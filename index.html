@@ -1,0 +1,766 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>微信群报销管理</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f5f6fa;color:#2c3e50;min-height:100vh}
+        .app{padding:12px;max-width:1100px;margin:0 auto}
+
+        /* 顶部栏 */
+        .topbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+        .topbar h1{font-size:20px;font-weight:700;color:#1a1a2e}
+        .user-info{display:flex;align-items:center;gap:10px;font-size:13px;color:#555}
+        .user-info .badge{background:#8E44AD;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px}
+        .btn{padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;transition:.15s}
+        .btn-sm{padding:4px 10px;font-size:12px}
+        .btn-danger{background:#E74C3C;color:#fff}.btn-danger:hover{background:#C0392B}
+        .btn-primary{background:#3498DB;color:#fff}.btn-primary:hover{background:#2980B9}
+        .btn-green{background:#27AE60;color:#fff}.btn-green:hover{background:#1E8449}
+        .btn-gray{background:#95A5A6;color:#fff}.btn-gray:hover{background:#7F8C8D}
+        .btn-outline{background:#fff;border:1px solid #ccc;color:#555}.btn-outline:hover{background:#f0f0f0}
+
+        /* 导出下拉 */
+        .dropdown{position:relative;display:inline-block}
+        .dropdown-menu{display:none;position:absolute;top:100%;right:0;background:#fff;border:1px solid #ddd;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.1);z-index:50;min-width:120px}
+        .dropdown-menu.show{display:block}
+        .dropdown-menu button{display:block;width:100%;padding:8px 14px;border:none;background:none;text-align:left;font-size:13px;cursor:pointer;color:#333;white-space:nowrap}
+        .dropdown-menu button:hover{background:#f0f4ff}
+
+        /* 搜索栏 */
+        .search-bar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px;background:#fff;padding:10px 12px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+        .search-bar input,.search-bar select{padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none}
+        .search-bar input:focus,.search-bar select:focus{border-color:#3498DB}
+        .search-bar input{flex:1;min-width:140px}
+        .search-bar select{min-width:90px}
+        .search-bar .sep{color:#ccc;font-size:12px}
+
+        /* 统计卡片 */
+        .stats-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+        .stat-card{flex:1;min-width:100px;background:#fff;border-radius:8px;padding:10px 14px;box-shadow:0 1px 3px rgba(0,0,0,.06);text-align:center}
+        .stat-card .num{font-size:22px;font-weight:700;color:#1a1a2e}
+        .stat-card .label{font-size:11px;color:#888;margin-top:2px}
+        .stat-card.accent .num{color:#E74C3C}
+
+        /* 统计面板 */
+        .stats-panel{display:none;background:#fff;border-radius:8px;padding:14px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+        .stats-panel.show{display:block}
+        .stats-panel h3{font-size:14px;margin-bottom:8px;color:#555}
+        .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+        .stats-table{width:100%;border-collapse:collapse;font-size:12px}
+        .stats-table th,.stats-table td{text-align:left;padding:5px 8px;border-bottom:1px solid #eee}
+        .stats-table th{color:#888;font-weight:500}
+
+        /* 表格 */
+        .table-wrap{background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+        table{width:100%;border-collapse:collapse;font-size:13px}
+        thead{background:#f8f9fb}
+        th,td{padding:9px 10px;text-align:left;border-bottom:1px solid #eee;white-space:nowrap}
+        th{font-weight:600;color:#555;font-size:12px;text-transform:uppercase;letter-spacing:.3px}
+        tr:hover td{background:#f0f4ff}
+        td.amount{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+        td.actions{text-align:center}
+        .empty-state{padding:40px;text-align:center;color:#999;font-size:14px}
+
+        /* 分页 */
+        .pagination{display:flex;align-items:center;justify-content:center;gap:4px;padding:10px;background:#fff;border-top:1px solid #eee}
+        .pagination button{min-width:32px;height:30px;border:1px solid #ddd;background:#fff;border-radius:5px;cursor:pointer;font-size:12px;color:#555}
+        .pagination button:hover{background:#f0f0f0}
+        .pagination button.active{background:#3498DB;color:#fff;border-color:#3498DB}
+        .pagination button:disabled{opacity:.4;cursor:default}
+        .pagination .info{font-size:12px;color:#888;margin:0 8px}
+
+        /* 弹窗 */
+        .modal-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.4);justify-content:center;align-items:center;z-index:1000}
+        .modal-overlay.show{display:flex}
+        .modal{background:#fff;border-radius:10px;padding:20px;min-width:320px;max-width:500px;box-shadow:0 8px 30px rgba(0,0,0,.15)}
+        .modal h2{font-size:17px;margin-bottom:14px}
+        .modal .row{margin-bottom:10px;display:flex;flex-direction:column;gap:4px}
+        .modal .row label{font-size:12px;color:#666}
+        .modal .row input,.modal .row select{padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px}
+        .modal .modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+
+        /* 备份列表 */
+        .backup-list{list-style:none;max-height:200px;overflow-y:auto}
+        .backup-list li{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;font-size:12px}
+        .backup-list .size{color:#999;margin-left:8px}
+        .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:8px 18px;border-radius:20px;font-size:13px;z-index:2000;opacity:0;transition:opacity .3s}
+        .toast.show{opacity:1}
+
+        /* 进度条 */
+        .progress-wrap{display:none;margin:10px 0}
+        .progress-wrap.show{display:block}
+        .progress-bar{width:100%;height:6px;background:#e8e8e8;border-radius:3px;overflow:hidden}
+        .progress-bar .fill{height:100%;background:linear-gradient(90deg,#3498DB,#2ECC71);border-radius:3px;transition:width .3s ease;width:0%}
+        .progress-label{font-size:12px;color:#888;margin-top:4px;text-align:center}
+
+        @media(max-width:640px){
+            .search-bar{flex-direction:column;align-items:stretch}
+            .search-bar select{width:100%}
+            .topbar h1{font-size:17px}
+            th,td{padding:7px 6px;font-size:12px}
+            .btn-sm{padding:3px 8px;font-size:11px}
+        }
+
+        /* 拖拽上传提示 */
+        .drop-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(52,152,219,.08);z-index:9999;pointer-events:none;border:3px dashed #3498DB;box-sizing:border-box}
+        .drop-overlay.show{display:block}
+        .drop-overlay::after{content:'释放以识别报销图片';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:22px;color:#3498DB;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+    </style>
+</head>
+<body>
+<div class="drop-overlay" id="dropOverlay"></div>
+<div class="app">
+    <!-- 顶部 -->
+    <div class="topbar">
+        <h1>微信群报销管理</h1>
+        <div class="user-info">
+            <span id="whoami">{{ username }}</span>
+            <span class="badge" id="adminBadge" style="display:none">管理员</span>
+            <button class="btn btn-outline btn-sm" onclick="showStats()">统计</button>
+            <div class="dropdown" id="exportDropdown">
+                <button class="btn btn-outline btn-sm" onclick="toggleExport()">导出 ▾</button>
+                <div class="dropdown-menu" id="exportMenu">
+                    <button onclick="doExport('excel')">导出 Excel</button>
+                    <button onclick="previewExport('pdf')">导出 PDF</button>
+                </div>
+            </div>
+            <button class="btn btn-outline btn-sm" id="backupBtn" style="display:none" onclick="showBackups()">备份</button>
+            <button class="btn btn-green btn-sm" onclick="showQuickAdd()">＋录入</button>
+            <button class="btn btn-gray btn-sm" onclick="logout()">退出</button>
+        </div>
+    </div>
+
+    <!-- 统计卡片 -->
+    <div class="stats-row" id="statsCards"></div>
+
+    <!-- 统计详情面板 -->
+    <div class="stats-panel" id="statsPanel">
+        <h3>数据统计 <button class="btn btn-sm btn-outline" style="float:right" onclick="hideStats()">收起</button></h3>
+        <div class="stats-grid" id="statsDetail"></div>
+    </div>
+
+    <!-- 搜索栏 -->
+    <div class="search-bar">
+        <input type="text" id="searchQ" placeholder="搜索 报销人/备注/品类..." oninput="debounceSearch()">
+        <input type="text" id="filterCategory" placeholder="品类筛选" list="catDatalist" oninput="debounceSearch()" autocomplete="off">
+        <datalist id="catDatalist"></datalist>
+        <select id="filterPerson" onchange="search()">
+            <option value="">全部报销人</option>
+        </select>
+        <span class="sep">日期：</span>
+        <input type="date" id="filterStart" onchange="search()" style="max-width:130px">
+        <span class="sep">~</span>
+        <input type="date" id="filterEnd" onchange="search()" style="max-width:130px">
+        <button class="btn btn-outline btn-sm" onclick="clearFilters()">清除</button>
+    </div>
+
+    <!-- 表格 -->
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>日期</th><th>报销人</th><th>品类</th><th>金额</th><th>图片</th><th>用户</th><th>备注</th><th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+        </table>
+        <div class="pagination" id="pager"></div>
+    </div>
+</div>
+
+<!-- 编辑弹窗 -->
+<div class="modal-overlay" id="editModal">
+    <div class="modal">
+        <h2>编辑报销记录</h2>
+        <div class="row"><label>日期</label><input type="date" id="editDate"></div>
+        <div class="row"><label>报销人</label><input type="text" id="editPerson"></div>
+        <div class="row"><label>品类</label><input type="text" id="editCategory" list="catDatalist" autocomplete="off"></div>
+        <div class="row"><label>金额</label><input type="number" step="0.01" id="editAmount"></div>
+        <div class="row"><label>备注</label><input type="text" id="editRemark"></div>
+        <div class="modal-actions">
+            <button class="btn btn-gray btn-sm" onclick="closeModal()">取消</button>
+            <button class="btn btn-primary btn-sm" onclick="saveEdit()">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- 备份弹窗 -->
+<div class="modal-overlay" id="backupModal">
+    <div class="modal">
+        <h2>备份管理</h2>
+        <div style="margin-bottom:10px">
+            <button class="btn btn-primary btn-sm" onclick="createBackup()">立即备份</button>
+        </div>
+        <ul class="backup-list" id="backupList"></ul>
+        <div class="modal-actions">
+            <button class="btn btn-gray btn-sm" onclick="closeBackupModal()">关闭</button>
+        </div>
+    </div>
+</div>
+
+<!-- 快捷录入弹窗 -->
+<div class="modal-overlay" id="quickAddModal">
+    <div class="modal" style="max-width:480px">
+        <h2>快捷录入</h2>
+        <div style="display:flex;gap:0;margin-bottom:10px;border-bottom:2px solid #eee">
+            <button class="btn btn-outline btn-sm tab-btn active" data-tab="text" onclick="switchTab('text')" style="border-bottom:none;border-radius:6px 6px 0 0">文本解析</button>
+            <button class="btn btn-outline btn-sm tab-btn" data-tab="ocr" onclick="switchTab('ocr')" style="border-bottom:none;border-radius:6px 6px 0 0">OCR识图</button>
+        </div>
+        <div id="tabText">
+            <textarea id="parseInput" rows="5" placeholder="粘贴报账文本&#10;示例：张三6月1号请客吃饭花了128.5元&#10;      李四 2024-06-02 交通 35 打车费" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;resize:vertical;font-family:inherit"></textarea>
+            <div id="parsePreview" style="margin-top:8px;font-size:12px;color:#555;max-height:120px;overflow-y:auto"></div>
+            <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end">
+                <button class="btn btn-outline btn-sm" onclick="parseAndPreview()">解析预览</button>
+                <button class="btn btn-primary btn-sm" id="confirmParseBtn" disabled onclick="confirmParse()">确认录入</button>
+            </div>
+        </div>
+        <div id="tabOcr" style="display:none">
+            <input type="file" id="ocrFileInput" accept="image/*" style="margin-bottom:8px;font-size:13px" onchange="previewOcrImage()">
+            <div id="ocrPreview" style="font-size:12px;color:#555;margin-bottom:8px"></div>
+            <button class="btn btn-primary btn-sm" id="ocrSubmitBtn" onclick="submitOcr()">识别并录入</button>
+            <div class="progress-wrap" id="ocrProgress">
+                <div class="progress-bar"><div class="fill" id="ocrProgressFill"></div></div>
+                <div class="progress-label" id="ocrProgressLabel"></div>
+            </div>
+            <div id="ocrResultPreview" style="display:none;margin-top:10px;border-top:1px solid #eee;padding-top:10px">
+                <div class="row"><label>日期</label><input type="date" id="ocrDate"></div>
+                <div class="row"><label>品类</label><input type="text" id="ocrCategory" list="catDatalist" autocomplete="off"></div>
+                <div class="row"><label>金额</label><input type="number" step="0.01" id="ocrAmount"></div>
+                <div class="row"><label>备注</label><input type="text" id="ocrRemark"></div>
+                <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end">
+                    <button class="btn btn-outline btn-sm" onclick="cancelOcrPreview()">取消</button>
+                    <button class="btn btn-green btn-sm" id="ocrConfirmBtn" onclick="confirmOcr()">确认录入</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-gray btn-sm" onclick="closeQuickAdd()">关闭</button>
+        </div>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- 图片查看浮层 -->
+<div class="modal-overlay" id="imageOverlay" onclick="closeImage()">
+    <img id="imageViewer" src="" style="max-width:90vw;max-height:90vh;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.3);cursor:default" onclick="event.stopPropagation()">
+</div>
+
+<!-- PDF 导出预览弹窗 -->
+<div class="modal-overlay" id="pdfPreviewModal">
+    <div class="modal" style="max-width:440px">
+        <h2>导出 PDF 预览</h2>
+        <div id="pdfPreviewContent" style="font-size:13px;line-height:1.8;margin-bottom:14px"></div>
+        <div class="modal-actions">
+            <button class="btn btn-gray btn-sm" onclick="closePdfPreview()">取消</button>
+            <button class="btn btn-primary btn-sm" onclick="confirmPdfDownload()">下载 PDF</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ---- 状态 ----
+let currentPage = 1;
+let totalPages = 1;
+let editingId = null;
+let isAdmin = false;
+let searchTimer = null;
+const PER_PAGE = 20;
+
+// ---- 初始化 ----
+async function init() {
+    await checkAdmin();
+    await Promise.all([search(), loadStats(), loadFilterOptions()]);
+}
+function checkAdmin() {
+    return fetch('/api/whoami').then(r=>r.json()).then(d=>{
+        isAdmin = d.is_admin;
+        if(isAdmin){
+            document.getElementById('adminBadge').style.display='inline';
+            document.getElementById('backupBtn').style.display='inline';
+        }
+    }).catch(()=>{});
+}
+
+// ---- 搜索/分页 ----
+async function search(page=1) {
+    currentPage = page;
+    const q = document.getElementById('searchQ').value.trim();
+    const category = document.getElementById('filterCategory').value;
+    const person = document.getElementById('filterPerson').value;
+    const start = document.getElementById('filterStart').value;
+    const end = document.getElementById('filterEnd').value;
+
+    let url = `/api/expenses/search?page=${page}&per_page=${PER_PAGE}`;
+    if(q) url += `&q=${encodeURIComponent(q)}`;
+    if(category) url += `&category=${encodeURIComponent(category)}`;
+    if(person) url += `&person=${encodeURIComponent(person)}`;
+    if(start) url += `&start_date=${start}`;
+    if(end) url += `&end_date=${end}`;
+
+    try {
+        const res = await fetch(url);
+        if(res.status === 401) { window.location='/login'; return; }
+        const d = await res.json();
+        totalPages = d.total_pages;
+        renderTable(d.data);
+        renderPager(d);
+    } catch(e) { toast('加载失败'); }
+}
+
+function renderTable(data) {
+    const tbody = document.getElementById('tableBody');
+    if(!data.length) {
+        tbody.innerHTML = `<tr><td colspan="8" class="empty-state">暂无数据</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = data.map(r=>`
+        <tr>
+            <td>${r.date}</td>
+            <td>${esc(r.person)}</td>
+            <td>${esc(r.category)}</td>
+            <td class="amount">¥${r.amount.toFixed(2)}</td>
+            <td>${r.image_path ? `<a href="#" onclick="viewImage('${escAttr(r.image_path)}');return false" style="color:#3498DB;font-size:12px">查看</a>` : '<span style="color:#ccc">-</span>'}</td>
+            <td>${esc(r.username||'')}</td>
+            <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.remark||'')}</td>
+            <td class="actions">
+                <button class="btn btn-outline btn-sm" onclick="openEdit(${r.id},'${r.date}','${esc(r.person)}','${esc(r.category)}',${r.amount},'${esc(r.remark||'')}')">编辑</button>
+                <button class="btn btn-danger btn-sm" onclick="del(${r.id})">删除</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function renderPager(d) {
+    const pager = document.getElementById('pager');
+    let html = `<span class="info">共 ${d.total} 条 / ¥${d.total_amount.toFixed(2)}</span>`;
+    html += `<button ${currentPage<=1?'disabled':''} onclick="search(1)">«</button>`;
+    html += `<button ${currentPage<=1?'disabled':''} onclick="search(${currentPage-1})">‹</button>`;
+
+    const start = Math.max(1, currentPage - 2);
+    const end = Math.min(totalPages, currentPage + 2);
+    for(let p=start; p<=end; p++) {
+        html += `<button class="${p===currentPage?'active':''}" onclick="search(${p})">${p}</button>`;
+    }
+
+    html += `<button ${currentPage>=totalPages?'disabled':''} onclick="search(${currentPage+1})">›</button>`;
+    html += `<button ${currentPage>=totalPages?'disabled':''} onclick="search(${totalPages})">»</button>`;
+    pager.innerHTML = html;
+}
+
+function debounceSearch() {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(()=>search(1), 300);
+}
+function clearFilters() {
+    document.getElementById('searchQ').value = '';
+    document.getElementById('filterCategory').value = '';
+    document.getElementById('filterPerson').value = '';
+    document.getElementById('filterStart').value = '';
+    document.getElementById('filterEnd').value = '';
+    search(1);
+}
+
+// ---- 统计 ----
+async function loadStats() {
+    try {
+        const res = await fetch('/api/stats');
+        const d = await res.json();
+        document.getElementById('statsCards').innerHTML = `
+            <div class="stat-card"><div class="num">${d.total_count}</div><div class="label">总条数</div></div>
+            <div class="stat-card accent"><div class="num">¥${d.total_amount.toFixed(2)}</div><div class="label">总金额</div></div>
+            <div class="stat-card"><div class="num">${d.by_person.length}</div><div class="label">报销人数</div></div>
+            <div class="stat-card"><div class="num">${d.by_category.length}</div><div class="label">品类数</div></div>
+        `;
+        window._statsData = d; // 缓存供详情面板使用
+    } catch(e) {}
+}
+function showStats() {
+    const panel = document.getElementById('statsPanel');
+    const d = window._statsData;
+    if(!d) return;
+    let html = `<div>
+        <table class="stats-table"><thead><tr><th>品类</th><th>笔数</th><th>金额</th></tr></thead><tbody>
+        ${d.by_category.map(c=>`<tr><td>${esc(c.category)}</td><td>${c.count}</td><td>¥${c.amount.toFixed(2)}</td></tr>`).join('')}
+        </tbody></table></div>
+        <div><table class="stats-table"><thead><tr><th>报销人</th><th>笔数</th><th>金额</th></tr></thead><tbody>
+        ${d.by_person.map(p=>`<tr><td>${esc(p.person)}</td><td>${p.count}</td><td>¥${p.amount.toFixed(2)}</td></tr>`).join('')}
+        </tbody></table></div>`;
+    document.getElementById('statsDetail').innerHTML = html;
+    panel.classList.add('show');
+}
+function hideStats() { document.getElementById('statsPanel').classList.remove('show'); }
+
+// ---- 筛选选项 ----
+async function loadFilterOptions() {
+    try {
+        const res = await fetch('/api/stats');
+        const d = await res.json();
+        // 品类 datalist
+        const catDL = document.getElementById('catDatalist');
+        catDL.innerHTML = d.by_category.map(c=>`<option value="${esc(c.category)}">`).join('');
+        // 报销人 select
+        const personSel = document.getElementById('filterPerson');
+        d.by_person.forEach(p=>{
+            const opt = document.createElement('option');
+            opt.value = p.person; opt.textContent = `${p.person} (${p.count})`;
+            personSel.appendChild(opt);
+        });
+    } catch(e) {}
+}
+
+// ---- 编辑 ----
+function openEdit(id, date, person, category, amount, remark) {
+    editingId = id;
+    document.getElementById('editDate').value = date;
+    document.getElementById('editPerson').value = person;
+    document.getElementById('editCategory').value = category;
+    document.getElementById('editAmount').value = amount;
+    document.getElementById('editRemark').value = remark;
+    document.getElementById('editModal').classList.add('show');
+}
+function closeModal() { document.getElementById('editModal').classList.remove('show'); }
+async function saveEdit() {
+    const body = {
+        date: document.getElementById('editDate').value,
+        person: document.getElementById('editPerson').value,
+        category: document.getElementById('editCategory').value,
+        amount: parseFloat(document.getElementById('editAmount').value),
+        remark: document.getElementById('editRemark').value
+    };
+    await fetch(`/api/expenses/${editingId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    closeModal();
+    search(currentPage);
+    loadStats();
+    toast('已保存');
+}
+async function del(id) {
+    if(!confirm('确定删除？')) return;
+    await fetch(`/api/expenses/${id}`,{method:'DELETE'});
+    search(currentPage);
+    loadStats();
+    toast('已删除');
+}
+
+// ---- 备份 ----
+async function showBackups() {
+    document.getElementById('backupModal').classList.add('show');
+    await loadBackupList();
+}
+function closeBackupModal() { document.getElementById('backupModal').classList.remove('show'); }
+async function loadBackupList() {
+    try {
+        const res = await fetch('/api/backups');
+        const data = await res.json();
+        document.getElementById('backupList').innerHTML = data.map(b=>`
+            <li>
+                <span>${b.filename} <span class="size">(${b.size_kb}KB)</span></span>
+                <span>
+                    <button class="btn btn-outline btn-sm" onclick="downloadBackup('${escAttr(b.path)}')">下载</button>
+                    <button class="btn btn-outline btn-sm" onclick="restoreBackup('${b.path}')">恢复</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteBackup('${escAttr(b.path)}')">删除</button>
+                </span>
+            </li>
+        `).join('') || '<li style="color:#999">暂无备份</li>';
+    } catch(e) {}
+}
+async function createBackup() {
+    const res = await fetch('/api/backups/create',{method:'POST'});
+    if(res.ok) { toast('备份完成'); loadBackupList(); }
+    else toast('备份失败');
+}
+async function restoreBackup(path) {
+    if(!confirm('恢复备份将覆盖当前数据，确定？')) return;
+    const res = await fetch('/api/backups/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path})});
+    if(res.ok) { toast('已恢复'); closeBackupModal(); search(); loadStats(); }
+    else toast('恢复失败');
+}
+function downloadBackup(path) {
+    window.open('/api/backups/download?path=' + encodeURIComponent(path), '_blank');
+}
+async function deleteBackup(path) {
+    if(!confirm('确定删除此备份？')) return;
+    const res = await fetch('/api/backups/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path})});
+    if(res.ok) { toast('已删除'); loadBackupList(); }
+    else toast('删除失败');
+}
+
+// ---- 快捷录入 ----
+let parsedRecords = [];
+function showQuickAdd() { document.getElementById('quickAddModal').classList.add('show'); }
+function closeQuickAdd() {
+    document.getElementById('quickAddModal').classList.remove('show');
+    parsedRecords = [];
+    document.getElementById('parseInput').value = '';
+    document.getElementById('parsePreview').innerHTML = '';
+    document.getElementById('confirmParseBtn').disabled = true;
+    document.getElementById('ocrFileInput').value = '';
+    document.getElementById('ocrPreview').innerHTML = '';
+    document.getElementById('ocrSubmitBtn').style.display = '';
+    document.getElementById('ocrSubmitBtn').disabled = false;
+    document.getElementById('ocrSubmitBtn').textContent = '识别并录入';
+    document.getElementById('ocrResultPreview').style.display = 'none';
+    document.getElementById('ocrProgress').classList.remove('show');
+    if(ocrPollTimer) { clearInterval(ocrPollTimer); ocrPollTimer = null; }
+}
+function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+    document.getElementById('tabText').style.display = tab==='text'?'block':'none';
+    document.getElementById('tabOcr').style.display = tab==='ocr'?'block':'none';
+}
+async function parseAndPreview() {
+    const text = document.getElementById('parseInput').value.trim();
+    if(!text) { toast('请粘贴报账文本'); return; }
+    const res = await fetch('/api/parse_text', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+    const d = await res.json();
+    if(d.error) { toast(d.error); return; }
+    parsedRecords = d.records;
+    document.getElementById('parsePreview').innerHTML = d.records.map((r,i)=>
+        `<div>${i+1}. ${r.date} | ${r.person} | ${r.category} | ¥${r.amount.toFixed(2)} ${r.remark||''}</div>`
+    ).join('');
+    document.getElementById('confirmParseBtn').disabled = d.records.length===0;
+    if(d.records.length) toast(`解析出 ${d.records.length} 条记录`);
+}
+async function confirmParse() {
+    if(!parsedRecords.length) return;
+    // Records already added by the parse_text API, just close and refresh
+    closeQuickAdd();
+    search(currentPage);
+    loadStats();
+    toast(`已录入 ${parsedRecords.length} 条`);
+}
+function previewOcrImage() {
+    const file = document.getElementById('ocrFileInput').files[0];
+    document.getElementById('ocrPreview').innerHTML = file ? `已选择：${file.name}` : '';
+}
+let ocrImagePath = '';
+let ocrPollTimer = null;
+async function submitOcr(file) {
+    if(!file) file = document.getElementById('ocrFileInput').files[0];
+    if(!file) { toast('请选择图片'); return; }
+    const btn = document.getElementById('ocrSubmitBtn');
+    const progressWrap = document.getElementById('ocrProgress');
+    const progressFill = document.getElementById('ocrProgressFill');
+    const progressLabel = document.getElementById('ocrProgressLabel');
+
+    btn.disabled = true; btn.textContent = '提交中...';
+    const fd = new FormData(); fd.append('image', file);
+
+    try {
+        const res = await fetch('/api/ocr', {method:'POST', body: fd});
+        const d = await res.json();
+        if(d.error) { toast(d.error); btn.disabled = false; btn.textContent = '识别并录入'; return; }
+
+        const taskId = d.task_id;
+        btn.style.display = 'none';
+        progressWrap.classList.add('show');
+        progressFill.style.width = '0%';
+        progressLabel.textContent = '准备中...';
+
+        ocrPollTimer = setInterval(async () => {
+            try {
+                const pr = await fetch('/api/ocr/progress/' + taskId);
+                const pd = await pr.json();
+                progressFill.style.width = pd.progress + '%';
+                progressLabel.textContent = pd.status;
+
+                if(pd.done) {
+                    clearInterval(ocrPollTimer);
+                    ocrPollTimer = null;
+                    progressWrap.classList.remove('show');
+
+                    if(pd.ok && pd.amount != null) {
+                        document.getElementById('ocrDate').value = new Date().toISOString().split('T')[0];
+                        document.getElementById('ocrCategory').value = '其他';
+                        document.getElementById('ocrAmount').value = pd.amount;
+                        document.getElementById('ocrRemark').value = pd.raw_text ? 'OCR识别: ' + pd.raw_text : 'OCR识别';
+                        ocrImagePath = pd.image_path || '';
+                        document.getElementById('ocrResultPreview').style.display = 'block';
+                        toast('识别成功：¥' + pd.amount.toFixed(2) + ' (' + (pd.engine||'') + ')');
+                    } else if(pd.ok) {
+                        toast(pd.message || '未提取到金额');
+                        btn.style.display = '';
+                        btn.disabled = false;
+                        btn.textContent = '识别并录入';
+                    } else {
+                        toast(pd.error || '识别失败');
+                        btn.style.display = '';
+                        btn.disabled = false;
+                        btn.textContent = '识别并录入';
+                    }
+                }
+            } catch(e) {
+                clearInterval(ocrPollTimer);
+                ocrPollTimer = null;
+                progressWrap.classList.remove('show');
+                toast('请求失败');
+                btn.style.display = '';
+                btn.disabled = false;
+                btn.textContent = '识别并录入';
+            }
+        }, 500);
+    } catch(e) {
+        toast('网络错误');
+        btn.disabled = false;
+        btn.textContent = '识别并录入';
+    }
+}
+function cancelOcrPreview() {
+    document.getElementById('ocrResultPreview').style.display = 'none';
+    const btn = document.getElementById('ocrSubmitBtn');
+    btn.style.display = '';
+    btn.disabled = false;
+    btn.textContent = '识别并录入';
+}
+async function confirmOcr() {
+    const body = {
+        date: document.getElementById('ocrDate').value,
+        person: document.getElementById('whoami').textContent,
+        category: document.getElementById('ocrCategory').value || '其他',
+        amount: parseFloat(document.getElementById('ocrAmount').value),
+        remark: document.getElementById('ocrRemark').value,
+        image_path: ocrImagePath
+    };
+    const res = await fetch('/api/expenses', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    if(res.ok) {
+        toast('已录入');
+        closeQuickAdd(); search(); loadStats();
+    } else {
+        const d = await res.json();
+        toast(d.error || '录入失败');
+    }
+}
+
+// ---- 辅助 ----
+function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escAttr(s) { return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;'); }
+function viewImage(path) {
+    document.getElementById('imageViewer').src = '/api/image/' + encodeURIComponent(path.split(/[/\\]/).pop());
+    document.getElementById('imageOverlay').classList.add('show');
+}
+function closeImage() {
+    document.getElementById('imageOverlay').classList.remove('show');
+}
+function toast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.classList.add('show');
+    setTimeout(()=>t.classList.remove('show'), 2000);
+}
+async function logout() {
+    await fetch('/api/logout',{method:'POST'});
+    window.location='/login';
+}
+
+// ---- 导出 ----
+let _exportFilters = null;
+function toggleExport() {
+    document.getElementById('exportMenu').classList.toggle('show');
+}
+document.addEventListener('click', e => {
+    if (!document.getElementById('exportDropdown').contains(e.target)) {
+        document.getElementById('exportMenu').classList.remove('show');
+    }
+});
+function doExport(fmt) {
+    document.getElementById('exportMenu').classList.remove('show');
+    const url = _buildExportUrl(fmt);
+    window.open(url, '_blank');
+}
+function _getFilters() {
+    return {
+        q: document.getElementById('searchQ').value.trim(),
+        category: document.getElementById('filterCategory').value,
+        person: document.getElementById('filterPerson').value,
+        start: document.getElementById('filterStart').value,
+        end: document.getElementById('filterEnd').value
+    };
+}
+function _buildExportUrl(fmt) {
+    const f = _getFilters();
+    let url = `/api/export?format=${fmt}`;
+    if (f.q) url += `&q=${encodeURIComponent(f.q)}`;
+    if (f.category) url += `&category=${encodeURIComponent(f.category)}`;
+    if (f.person) url += `&person=${encodeURIComponent(f.person)}`;
+    if (f.start) url += `&start_date=${f.start}`;
+    if (f.end) url += `&end_date=${f.end}`;
+    return url;
+}
+async function previewExport(fmt) {
+    document.getElementById('exportMenu').classList.remove('show');
+    const f = _getFilters();
+    let url = '/api/expenses/search?per_page=5';
+    if (f.q) url += `&q=${encodeURIComponent(f.q)}`;
+    if (f.category) url += `&category=${encodeURIComponent(f.category)}`;
+    if (f.person) url += `&person=${encodeURIComponent(f.person)}`;
+    if (f.start) url += `&start_date=${f.start}`;
+    if (f.end) url += `&end_date=${f.end}`;
+    try {
+        const res = await fetch(url);
+        const d = await res.json();
+        if (d.total === 0) { toast('没有可导出的数据'); return; }
+        _exportFilters = f;
+        const lines = [];
+        lines.push(`即将导出 <b>${d.total}</b> 条报销记录`);
+        lines.push(`合计金额：<b style="color:#E74C3C">¥${d.total_amount.toLocaleString('zh-CN', {minimumFractionDigits:2})}</b>`);
+        if (d.data.length > 0) {
+            lines.push('<hr style="margin:8px 0;border-color:#eee">');
+            lines.push('<table style="width:100%;font-size:12px;border-collapse:collapse">');
+            lines.push('<tr style="color:#888"><td>日期</td><td>报销人</td><td>品类</td><td>金额</td></tr>');
+            for (const r of d.data.slice(0, 5)) {
+                lines.push(`<tr><td>${esc(r.date)}</td><td>${esc(r.person)}</td><td>${esc(r.category)}</td><td style="text-align:right">¥${r.amount.toLocaleString('zh-CN',{minimumFractionDigits:2})}</td></tr>`);
+            }
+            if (d.total > 5) lines.push(`<tr><td colspan="4" style="color:#999;text-align:center">... 共 ${d.total} 条</td></tr>`);
+            lines.push('</table>');
+        }
+        document.getElementById('pdfPreviewContent').innerHTML = lines.join('');
+        document.getElementById('pdfPreviewModal').classList.add('show');
+    } catch(e) { toast('加载预览失败'); }
+}
+function closePdfPreview() {
+    document.getElementById('pdfPreviewModal').classList.remove('show');
+}
+function confirmPdfDownload() {
+    closePdfPreview();
+    window.open(_buildExportUrl('pdf'), '_blank');
+}
+
+// 拖拽图片上传（桌面拖入图片自动识别）
+let dragCounter = 0;
+const dropOverlay = document.getElementById('dropOverlay');
+document.addEventListener('dragenter', function(e) {
+    e.preventDefault();
+    dragCounter++;
+    if (dragCounter === 1) dropOverlay.classList.add('show');
+}, true);
+document.addEventListener('dragleave', function(e) {
+    dragCounter--;
+    if (dragCounter <= 0) { dragCounter = 0; dropOverlay.classList.remove('show'); }
+}, true);
+document.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+}, true);
+document.addEventListener('drop', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter = 0;
+    dropOverlay.classList.remove('show');
+    const files = e.dataTransfer.files;
+    if (!files.length) return;
+    const file = files[0];
+    if (!file.type.startsWith('image/')) return;
+
+    const modal = document.getElementById('quickAddModal');
+    if (!modal.classList.contains('show')) showQuickAdd();
+    switchTab('ocr');
+    document.getElementById('ocrPreview').innerHTML = '已拖入：' + file.name;
+    submitOcr(file);
+}, true);
+
+init();
+</script>
+</body>
+</html>

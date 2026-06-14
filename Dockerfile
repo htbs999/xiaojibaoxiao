@@ -1,20 +1,16 @@
 FROM python:3.9-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
-
 WORKDIR /app
 
-# 先拷依赖文件（利用缓存）
+# 安装依赖
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
-# 再拷全部代码
+# 复制代码
 COPY . .
 
-# 云托管会注入 PORT；你 app.py 里要用 os.environ.get("PORT",...)
+# 暴露端口
 EXPOSE 5000
 
-# 用 python 直接跑（小项目够用）
-CMD ["sh", "-c", "python app.py"]
+# 用 gunicorn 启动（4个worker，生产环境）
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--timeout", "120", "app:app"]
