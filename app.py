@@ -1,12 +1,10 @@
 """
 微信群报销管理工具 - Flask Web 版
-支持多用户登录、OCR 识图、文本解析、Excel 导出、搜索/分页/统计
-（已移除备份功能）
+支持多用户登录、文本解析、Excel/PDF导出、搜索/分页/统计
 """
 
 import os
 import sys
-import io
 import uuid
 from datetime import datetime
 from functools import wraps
@@ -14,9 +12,9 @@ from threading import Thread
 
 from flask import (
     Flask, request, redirect, url_for, render_template_string,
-    session, jsonify, send_file, make_response
+    session, jsonify, send_file
 )
-# 确保当前目录在 sys.path 中
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from db_manager import (
@@ -29,20 +27,19 @@ from db_manager import (
 from text_parser import parse_expense_text
 from excel_exporter import export_to_excel
 from pdf_exporter import export_to_pdf
-from config import BACKUP_DIR, resource_path
+from config import resource_path
 from logger import get_logger
 
 log = get_logger("server")
 app = Flask(__name__)
 app.secret_key = os.urandom(24).hex()
 
-# ====== 新增：适配 HTTPS 环境的 session cookie 配置 ======
+# 适配 HTTPS 环境的 session cookie 配置
 app.config.update(
-    SESSION_COOKIE_SECURE=True,      # 云托管是 HTTPS，必须设为 True
+    SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_SAMESITE='Lax',
     SESSION_COOKIE_HTTPONLY=True
 )
-# ========================================================
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -50,19 +47,8 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 init_db()
 log.info("Flask 服务初始化完成")
 
-# OCR 延迟加载，避免启动时卡在 paddleocr 导入
-_ocr_ready = None
-
-def _get_ocr_ready():
-    global _ocr_ready
-    if _ocr_ready is None:
-        from ocr_handler import is_ocr_available
-        _ocr_ready = is_ocr_available()
-    return _ocr_ready
-
 
 # ========== 鉴权装饰器 ==========
-
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -75,7 +61,6 @@ def login_required(f):
 
 
 # ========== 页面路由 ==========
-
 @app.route("/")
 @login_required
 def index():
@@ -95,7 +80,6 @@ def serve_index():
         return f"index.html not found at {html_path}", 404
     with open(html_path, 'r', encoding='utf-8') as f:
         content = f.read()
-    # 渲染模板，传入当前登录用户名
     return render_template_string(content, username=session.get('username', ''))
 
 
@@ -108,9 +92,7 @@ def serve_login():
     return render_template_string(content, username=session.get('username', ''))
 
 
-
 # ========== API：认证 ==========
-
 @app.route("/api/login", methods=["POST"])
 def api_login():
     data = request.get_json()
@@ -140,7 +122,6 @@ def api_whoami():
 
 
 # ========== API：报销数据 ==========
-
 @app.route("/api/expenses")
 @login_required
 def api_expenses():
@@ -196,7 +177,6 @@ def api_delete_expense(exp_id):
 
 
 # ========== API：文本解析 ==========
-
 @app.route("/api/parse_text", methods=["POST"])
 @login_required
 def api_parse_text():
@@ -221,9 +201,7 @@ def api_parse_text():
 
 
 # ========== API：OCR 识图 ==========
-
-_ocr_tasks = {}  # {task_id: {"progress": int, "status": str, "result": dict|None, "done": bool}}
-
+_ocr_tasks = {}
 
 @app.route("/api/ocr", methods=["POST"])
 @login_required
@@ -310,9 +288,7 @@ def api_ocr_progress(task_id):
 
 
 # ========== API：导出 ==========
-
 def _build_export_query():
-    """构建筛选查询，返回 (rows, error_response)"""
     q = (request.args.get("q") or "").strip()
     category = (request.args.get("category") or "").strip()
     person = (request.args.get("person") or "").strip()
@@ -397,7 +373,6 @@ def api_export():
 
 
 # ========== API：图片查看 ==========
-
 @app.route("/api/image/<filename>")
 @login_required
 def api_image(filename):
@@ -408,18 +383,15 @@ def api_image(filename):
 
 
 # ========== API：搜索 & 分页 ==========
-
 @app.route("/api/expenses/search")
 @login_required
 def api_expenses_search():
-    """支持搜索、筛选、分页（复用 _build_export_query 的筛选逻辑）"""
     page = max(1, int(request.args.get("page", 1)))
     per_page = min(100, max(5, int(request.args.get("per_page", 20))))
 
     all_data = _build_export_query()
     total = len(all_data)
 
-    # 分页截取
     offset = (page - 1) * per_page
     data = all_data[offset:offset + per_page]
 
@@ -436,7 +408,6 @@ def api_expenses_search():
 
 
 # ========== API：统计 ==========
-
 @app.route("/api/stats")
 @login_required
 def api_stats():
@@ -445,19 +416,16 @@ def api_stats():
     user_filter = "" if is_admin else "WHERE e.user_id = ?"
     params = [] if is_admin else [session["user_id"]]
 
-    # 按品类统计
     cat_rows = conn.execute(
         f"SELECT e.category, COUNT(*) as cnt, SUM(e.amount) as total "
         f"FROM expenses e {user_filter} GROUP BY e.category ORDER BY total DESC",
         params).fetchall()
 
-    # 按人统计
     person_rows = conn.execute(
         f"SELECT e.person, COUNT(*) as cnt, SUM(e.amount) as total "
         f"FROM expenses e {user_filter} GROUP BY e.person ORDER BY total DESC",
         params).fetchall()
 
-    # 总计
     total_row = conn.execute(
         f"SELECT COUNT(*) as cnt, COALESCE(SUM(e.amount), 0) as total "
         f"FROM expenses e {user_filter}", params).fetchone()
@@ -475,10 +443,8 @@ def api_stats():
 
 
 # ========== 启动 ==========
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    print(f"\n  报销管理 Web 版已启动 (热更新已启用)")
-    print(f"  局域网访问: http://0.0.0.0:{port}")
-    print(f"  修改 .py 文件保存后自动重启\n")
+    print(f"\n  报销管理 Web 版已启动")
+    print(f"  监听端口: {port}\n")
     app.run(host="0.0.0.0", port=port, debug=True)
