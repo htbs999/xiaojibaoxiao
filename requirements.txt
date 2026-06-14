@@ -6,3 +6,4 @@ reportlab==4.0.4
 # paddlepaddle==2.6.1
 Werkzeug==2.3.7
 gunicorn==21.2.0
+fpdf2==2.7.9
