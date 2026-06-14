@@ -1,4 +1,4 @@
-mport os
+import os
 import sys
 
 BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backups")
