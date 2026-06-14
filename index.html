@@ -82,10 +82,6 @@
         .modal .row input,.modal .row select{padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px}
         .modal .modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
 
-        /* 备份列表 */
-        .backup-list{list-style:none;max-height:200px;overflow-y:auto}
-        .backup-list li{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;font-size:12px}
-        .backup-list .size{color:#999;margin-left:8px}
         .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:8px 18px;border-radius:20px;font-size:13px;z-index:2000;opacity:0;transition:opacity .3s}
         .toast.show{opacity:1}
 
@@ -127,7 +123,6 @@
                     <button onclick="previewExport('pdf')">导出 PDF</button>
                 </div>
             </div>
-            <button class="btn btn-outline btn-sm" id="backupBtn" style="display:none" onclick="showBackups()">备份</button>
             <button class="btn btn-green btn-sm" onclick="showQuickAdd()">＋录入</button>
             <button class="btn btn-gray btn-sm" onclick="logout()">退出</button>
         </div>
@@ -183,20 +178,6 @@
         <div class="modal-actions">
             <button class="btn btn-gray btn-sm" onclick="closeModal()">取消</button>
             <button class="btn btn-primary btn-sm" onclick="saveEdit()">保存</button>
-        </div>
-    </div>
-</div>
-
-<!-- 备份弹窗 -->
-<div class="modal-overlay" id="backupModal">
-    <div class="modal">
-        <h2>备份管理</h2>
-        <div style="margin-bottom:10px">
-            <button class="btn btn-primary btn-sm" onclick="createBackup()">立即备份</button>
-        </div>
-        <ul class="backup-list" id="backupList"></ul>
-        <div class="modal-actions">
-            <button class="btn btn-gray btn-sm" onclick="closeBackupModal()">关闭</button>
         </div>
     </div>
 </div>
@@ -276,11 +257,10 @@ async function init() {
     await Promise.all([search(), loadStats(), loadFilterOptions()]);
 }
 function checkAdmin() {
-    return fetch('/api/whoami').then(r=>r.json()).then(d=>{
+    return fetch('/api/whoami', { credentials: 'include' }).then(r=>r.json()).then(d=>{
         isAdmin = d.is_admin;
         if(isAdmin){
             document.getElementById('adminBadge').style.display='inline';
-            document.getElementById('backupBtn').style.display='inline';
         }
     }).catch(()=>{});
 }
@@ -302,7 +282,7 @@ async function search(page=1) {
     if(end) url += `&end_date=${end}`;
 
     try {
-        const res = await fetch(url);
+        const res = await fetch(url, { credentials: 'include' });
         if(res.status === 401) { window.location='/login'; return; }
         const d = await res.json();
         totalPages = d.total_pages;
@@ -367,7 +347,7 @@ function clearFilters() {
 // ---- 统计 ----
 async function loadStats() {
     try {
-        const res = await fetch('/api/stats');
+        const res = await fetch('/api/stats', { credentials: 'include' });
         const d = await res.json();
         document.getElementById('statsCards').innerHTML = `
             <div class="stat-card"><div class="num">${d.total_count}</div><div class="label">总条数</div></div>
@@ -375,7 +355,7 @@ async function loadStats() {
             <div class="stat-card"><div class="num">${d.by_person.length}</div><div class="label">报销人数</div></div>
             <div class="stat-card"><div class="num">${d.by_category.length}</div><div class="label">品类数</div></div>
         `;
-        window._statsData = d; // 缓存供详情面板使用
+        window._statsData = d;
     } catch(e) {}
 }
 function showStats() {
@@ -397,12 +377,10 @@ function hideStats() { document.getElementById('statsPanel').classList.remove('s
 // ---- 筛选选项 ----
 async function loadFilterOptions() {
     try {
-        const res = await fetch('/api/stats');
+        const res = await fetch('/api/stats', { credentials: 'include' });
         const d = await res.json();
-        // 品类 datalist
         const catDL = document.getElementById('catDatalist');
         catDL.innerHTML = d.by_category.map(c=>`<option value="${esc(c.category)}">`).join('');
-        // 报销人 select
         const personSel = document.getElementById('filterPerson');
         d.by_person.forEach(p=>{
             const opt = document.createElement('option');
@@ -431,7 +409,7 @@ async function saveEdit() {
         amount: parseFloat(document.getElementById('editAmount').value),
         remark: document.getElementById('editRemark').value
     };
-    await fetch(`/api/expenses/${editingId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    await fetch(`/api/expenses/${editingId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body), credentials: 'include'});
     closeModal();
     search(currentPage);
     loadStats();
@@ -439,53 +417,10 @@ async function saveEdit() {
 }
 async function del(id) {
     if(!confirm('确定删除？')) return;
-    await fetch(`/api/expenses/${id}`,{method:'DELETE'});
+    await fetch(`/api/expenses/${id}`,{method:'DELETE', credentials: 'include'});
     search(currentPage);
     loadStats();
     toast('已删除');
-}
-
-// ---- 备份 ----
-async function showBackups() {
-    document.getElementById('backupModal').classList.add('show');
-    await loadBackupList();
-}
-function closeBackupModal() { document.getElementById('backupModal').classList.remove('show'); }
-async function loadBackupList() {
-    try {
-        const res = await fetch('/api/backups');
-        const data = await res.json();
-        document.getElementById('backupList').innerHTML = data.map(b=>`
-            <li>
-                <span>${b.filename} <span class="size">(${b.size_kb}KB)</span></span>
-                <span>
-                    <button class="btn btn-outline btn-sm" onclick="downloadBackup('${escAttr(b.path)}')">下载</button>
-                    <button class="btn btn-outline btn-sm" onclick="restoreBackup('${b.path}')">恢复</button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteBackup('${escAttr(b.path)}')">删除</button>
-                </span>
-            </li>
-        `).join('') || '<li style="color:#999">暂无备份</li>';
-    } catch(e) {}
-}
-async function createBackup() {
-    const res = await fetch('/api/backups/create',{method:'POST'});
-    if(res.ok) { toast('备份完成'); loadBackupList(); }
-    else toast('备份失败');
-}
-async function restoreBackup(path) {
-    if(!confirm('恢复备份将覆盖当前数据，确定？')) return;
-    const res = await fetch('/api/backups/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path})});
-    if(res.ok) { toast('已恢复'); closeBackupModal(); search(); loadStats(); }
-    else toast('恢复失败');
-}
-function downloadBackup(path) {
-    window.open('/api/backups/download?path=' + encodeURIComponent(path), '_blank');
-}
-async function deleteBackup(path) {
-    if(!confirm('确定删除此备份？')) return;
-    const res = await fetch('/api/backups/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path})});
-    if(res.ok) { toast('已删除'); loadBackupList(); }
-    else toast('删除失败');
 }
 
 // ---- 快捷录入 ----
@@ -514,7 +449,7 @@ function switchTab(tab) {
 async function parseAndPreview() {
     const text = document.getElementById('parseInput').value.trim();
     if(!text) { toast('请粘贴报账文本'); return; }
-    const res = await fetch('/api/parse_text', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+    const res = await fetch('/api/parse_text', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text}), credentials: 'include'});
     const d = await res.json();
     if(d.error) { toast(d.error); return; }
     parsedRecords = d.records;
@@ -526,7 +461,6 @@ async function parseAndPreview() {
 }
 async function confirmParse() {
     if(!parsedRecords.length) return;
-    // Records already added by the parse_text API, just close and refresh
     closeQuickAdd();
     search(currentPage);
     loadStats();
@@ -550,7 +484,7 @@ async function submitOcr(file) {
     const fd = new FormData(); fd.append('image', file);
 
     try {
-        const res = await fetch('/api/ocr', {method:'POST', body: fd});
+        const res = await fetch('/api/ocr', {method:'POST', body: fd, credentials: 'include'});
         const d = await res.json();
         if(d.error) { toast(d.error); btn.disabled = false; btn.textContent = '识别并录入'; return; }
 
@@ -562,7 +496,7 @@ async function submitOcr(file) {
 
         ocrPollTimer = setInterval(async () => {
             try {
-                const pr = await fetch('/api/ocr/progress/' + taskId);
+                const pr = await fetch('/api/ocr/progress/' + taskId, { credentials: 'include' });
                 const pd = await pr.json();
                 progressFill.style.width = pd.progress + '%';
                 progressLabel.textContent = pd.status;
@@ -624,7 +558,7 @@ async function confirmOcr() {
         remark: document.getElementById('ocrRemark').value,
         image_path: ocrImagePath
     };
-    const res = await fetch('/api/expenses', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    const res = await fetch('/api/expenses', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), credentials: 'include'});
     if(res.ok) {
         toast('已录入');
         closeQuickAdd(); search(); loadStats();
@@ -650,7 +584,7 @@ function toast(msg) {
     setTimeout(()=>t.classList.remove('show'), 2000);
 }
 async function logout() {
-    await fetch('/api/logout',{method:'POST'});
+    await fetch('/api/logout',{method:'POST', credentials: 'include'});
     window.location='/login';
 }
 
@@ -698,7 +632,7 @@ async function previewExport(fmt) {
     if (f.start) url += `&start_date=${f.start}`;
     if (f.end) url += `&end_date=${f.end}`;
     try {
-        const res = await fetch(url);
+        const res = await fetch(url, { credentials: 'include' });
         const d = await res.json();
         if (d.total === 0) { toast('没有可导出的数据'); return; }
         _exportFilters = f;
@@ -727,7 +661,7 @@ function confirmPdfDownload() {
     window.open(_buildExportUrl('pdf'), '_blank');
 }
 
-// 拖拽图片上传（桌面拖入图片自动识别）
+// 拖拽图片上传
 let dragCounter = 0;
 const dropOverlay = document.getElementById('dropOverlay');
 document.addEventListener('dragenter', function(e) {

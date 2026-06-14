@@ -36,6 +36,14 @@ log = get_logger("server")
 app = Flask(__name__)
 app.secret_key = os.urandom(24).hex()
 
+# ====== 新增：适配 HTTPS 环境的 session cookie 配置 ======
+app.config.update(
+    SESSION_COOKIE_SECURE=True,      # 云托管是 HTTPS，必须设为 True
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_HTTPONLY=True
+)
+# ========================================================
+
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
