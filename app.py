@@ -10,10 +10,18 @@ from datetime import datetime
 from functools import wraps
 from threading import Thread
 
+from werkzeug.middleware.proxy_fix import ProxyFix
+
 from flask import (
     Flask, request, redirect, url_for, render_template_string,
     session, jsonify, send_file, abort
 )
+
+app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "my-fixed-dev-key-123456")
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+
+
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -54,6 +62,7 @@ def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if "user_id" not in session:
+            log.warning(f"Session missing user_id, path={request.path}, session={dict(session)}")
             if request.path.startswith("/api/"):
                 return jsonify({"error": "未登录"}), 401
             return redirect(url_for("login_page"))
@@ -120,6 +129,7 @@ def api_login():
     session["user_id"] = user["id"]
     session["username"] = user["username"]
     session.modified = True  # 强制保存 session
+    log.info(f"User {user['username']} logged in, session: {dict(session)}")
     return jsonify({"ok": True, "username": user["username"]})
 
 

@@ -56,7 +56,7 @@ async function doLogin() {
             credentials: 'include',   // ← 关键：带上 cookie
             body: JSON.stringify({username: name})
         });
-        if (r.ok) { location.href = "/"; }
+        if (r.ok) { window.location.replace("/") }
         else { const d = await r.json(); alert(d.error); }
     } catch (e) { alert("连接失败，请检查服务是否启动"); }
 }
