@@ -506,20 +506,38 @@ async function submitOcr(file) {
                     ocrPollTimer = null;
                     progressWrap.classList.remove('show');
 
-                    if(pd.ok && pd.amount != null) {
+                    // ★★★ 关键修改：不管 amount 是否为 null，都显示预览表单 ★★★
+                    if(pd.ok) {
+                        // 填充日期（默认今天）
                         document.getElementById('ocrDate').value = new Date().toISOString().split('T')[0];
+                        // 品类默认“其他”
                         document.getElementById('ocrCategory').value = '其他';
-                        document.getElementById('ocrAmount').value = pd.amount;
-                        document.getElementById('ocrRemark').value = pd.raw_text ? 'OCR识别: ' + pd.raw_text : 'OCR识别';
+                        // 金额：如果识别到就填入，否则留空（让用户手动输入）
+                        if(pd.amount != null) {
+                            document.getElementById('ocrAmount').value = pd.amount;
+                        } else {
+                            document.getElementById('ocrAmount').value = '';
+                            document.getElementById('ocrAmount').placeholder = '手动输入金额';
+                        }
+                        // 备注：显示原始识别文本（如果有）
+                        let remark = '';
+                        if(pd.raw_text) {
+                            remark = 'OCR识别: ' + pd.raw_text;
+                        } else {
+                            remark = 'OCR识别（未提取到金额）';
+                        }
+                        document.getElementById('ocrRemark').value = remark;
                         ocrImagePath = pd.image_path || '';
                         document.getElementById('ocrResultPreview').style.display = 'block';
-                        toast('识别成功：¥' + pd.amount.toFixed(2) + ' (' + (pd.engine||'') + ')');
-                    } else if(pd.ok) {
-                        toast(pd.message || '未提取到金额');
-                        btn.style.display = '';
-                        btn.disabled = false;
-                        btn.textContent = '识别并录入';
+
+                        // 提示用户
+                        if(pd.amount != null) {
+                            toast('识别成功：¥' + pd.amount.toFixed(2) + ' (' + (pd.engine||'') + ')');
+                        } else {
+                            toast('未识别到金额，请手动输入');
+                        }
                     } else {
+                        // 识别失败（后端返回 ok=false）
                         toast(pd.error || '识别失败');
                         btn.style.display = '';
                         btn.disabled = false;
@@ -550,11 +568,17 @@ function cancelOcrPreview() {
     btn.textContent = '识别并录入';
 }
 async function confirmOcr() {
+    const amountStr = document.getElementById('ocrAmount').value.trim();
+    const amount = parseFloat(amountStr);
+    if (isNaN(amount) || amount <= 0) {
+        toast('请输入有效的金额');
+        return;
+    }
     const body = {
         date: document.getElementById('ocrDate').value,
         person: document.getElementById('whoami').textContent,
         category: document.getElementById('ocrCategory').value || '其他',
-        amount: parseFloat(document.getElementById('ocrAmount').value),
+        amount: amount,
         remark: document.getElementById('ocrRemark').value,
         image_path: ocrImagePath
     };

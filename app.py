@@ -282,23 +282,32 @@ def api_ocr_progress(task_id):
     task = _ocr_tasks.get(task_id)
     if not task:
         return jsonify({"error": "任务不存在"}), 404
-    resp = {"progress": task["progress"], "status": task["status"], "done": task["done"]}
+
+    resp = {
+        "progress": task["progress"],
+        "status": task["status"],
+        "done": task["done"],
+    }
+
     if task["done"] and task["result"]:
         r = task["result"]
-        if r["success"] and r["amount"] is not None:
-            resp.update({"ok": True, "amount": r["amount"], "engine": r.get("engine"),
-                         "image_path": task.get("image_path", ""),
-                         "raw_text": r.get("raw_text", ""),
-                         "message": "识别成功，请确认后录入"})
-        elif r.get("success") and r.get("amount") is None:
-            resp.update({"ok": True, "amount": None, "engine": r.get("engine"),
-                         "raw_text": r.get("raw_text", ""),
-                         "message": "识别成功但未提取到金额"})
+        if r["success"]:
+            # ★ 关键：即使 amount 为 None，也返回 ok: true
+            resp["ok"] = True
+            resp["amount"] = r.get("amount")  # 可能是 None
+            resp["engine"] = r.get("engine")
+            resp["image_path"] = task.get("image_path", "")
+            resp["raw_text"] = r.get("raw_text", "")
+            if r.get("amount") is not None:
+                resp["message"] = "识别成功，请确认后录入"
+            else:
+                resp["message"] = "未识别到金额，请手动输入"
         else:
-            resp.update({"ok": False, "error": r.get("error", "识别失败"),
-                         "raw_text": r.get("raw_text", "")})
-    return jsonify(resp)
+            resp["ok"] = False
+            resp["error"] = r.get("error", "识别失败")
+            resp["raw_text"] = r.get("raw_text", "")
 
+    return jsonify(resp)
 
 # ---- 导出 / 查询 / 统计（不动） ----
 def _build_export_query():
