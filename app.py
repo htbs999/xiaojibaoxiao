@@ -34,11 +34,12 @@ log = get_logger("server")
 app = Flask(__name__)
 app.secret_key = os.urandom(24).hex()
 
-# 适配 HTTPS 环境的 session cookie 配置
+# 适配云托管环境的 session cookie 配置（关键修复）
 app.config.update(
-    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_SECURE=False,      # 云托管内部 HTTPS 由代理处理，Flask 自身不需要 Secure
     SESSION_COOKIE_SAMESITE='Lax',
-    SESSION_COOKIE_HTTPONLY=True
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_PATH='/',
 )
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
@@ -89,7 +90,8 @@ def serve_login():
         return f"login.html not found at {html_path}", 404
     with open(html_path, 'r', encoding='utf-8') as f:
         content = f.read()
-    return render_template_string(content, username=session.get('username', ''))
+    # login.html 不需要 username 变量，直接渲染
+    return render_template_string(content)
 
 
 # ========== API：认证 ==========
@@ -102,6 +104,7 @@ def api_login():
     user = get_or_create_user(username)
     session["user_id"] = user["id"]
     session["username"] = user["username"]
+    session.modified = True  # 强制保存 session
     return jsonify({"ok": True, "username": user["username"]})
 
 
