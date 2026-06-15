@@ -12,7 +12,7 @@ from threading import Thread
 
 from flask import (
     Flask, request, redirect, url_for, render_template_string,
-    session, jsonify, send_file
+    session, jsonify, send_file, abort
 )
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -34,7 +34,7 @@ log = get_logger("server")
 app = Flask(__name__)
 app.secret_key = os.urandom(24).hex()
 
-# 适配云托管环境的 session cookie 配置（关键修复）
+# 适配云托管环境的 session cookie 配置
 app.config.update(
     SESSION_COOKIE_SECURE=False,      # 云托管内部 HTTPS 由代理处理，Flask 自身不需要 Secure
     SESSION_COOKIE_SAMESITE='Lax',
@@ -90,8 +90,23 @@ def serve_login():
         return f"login.html not found at {html_path}", 404
     with open(html_path, 'r', encoding='utf-8') as f:
         content = f.read()
-    # login.html 不需要 username 变量，直接渲染
     return render_template_string(content)
+
+
+# ========== 处理 favicon.ico 等常见杂项请求 ==========
+@app.route('/favicon.ico')
+def favicon():
+    # 返回空响应，避免浏览器因找不到图标而报 404
+    return '', 204
+
+
+# ========== 全局 404 错误处理器 ==========
+@app.errorhandler(404)
+def not_found(error):
+    # 如果是 API 请求，返回 JSON；否则返回简单文本
+    if request.path.startswith('/api/'):
+        return jsonify({"error": "接口不存在"}), 404
+    return "<h1>页面未找到</h1><p>请检查网址是否正确</p>", 404
 
 
 # ========== API：认证 ==========
@@ -450,4 +465,5 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     print(f"\n  报销管理 Web 版已启动")
     print(f"  监听端口: {port}\n")
-    app.run(host="0.0.0.0", port=port, debug=True)
+    # 关闭 reloader 避免调试时自动重启导致页面闪烁
+    app.run(host="0.0.0.0", port=port, debug=True, use_reloader=False)
