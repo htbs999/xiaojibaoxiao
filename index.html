@@ -5,12 +5,109 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>微信群报销管理</title>
     <style>
-        /* ====== 样式部分完全保留你原有的，此处省略以节省篇幅 ====== */
-        /* 实际使用时请保留你原有的全部样式 */
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f5f6fa;color:#2c3e50;min-height:100vh}
         .app{padding:12px;max-width:1100px;margin:0 auto}
-        /* …… 其余样式完全沿用你已有的，此处不重复粘贴，但最终文件应包含全部样式 */
+
+        /* 顶部栏 */
+        .topbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+        .topbar h1{font-size:20px;font-weight:700;color:#1a1a2e}
+        .user-info{display:flex;align-items:center;gap:10px;font-size:13px;color:#555}
+        .user-info .badge{background:#8E44AD;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px}
+        .btn{padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;transition:.15s}
+        .btn-sm{padding:4px 10px;font-size:12px}
+        .btn-danger{background:#E74C3C;color:#fff}.btn-danger:hover{background:#C0392B}
+        .btn-primary{background:#3498DB;color:#fff}.btn-primary:hover{background:#2980B9}
+        .btn-green{background:#27AE60;color:#fff}.btn-green:hover{background:#1E8449}
+        .btn-gray{background:#95A5A6;color:#fff}.btn-gray:hover{background:#7F8C8D}
+        .btn-outline{background:#fff;border:1px solid #ccc;color:#555}.btn-outline:hover{background:#f0f0f0}
+
+        /* 导出下拉 */
+        .dropdown{position:relative;display:inline-block}
+        .dropdown-menu{display:none;position:absolute;top:100%;right:0;background:#fff;border:1px solid #ddd;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.1);z-index:50;min-width:120px}
+        .dropdown-menu.show{display:block}
+        .dropdown-menu button{display:block;width:100%;padding:8px 14px;border:none;background:none;text-align:left;font-size:13px;cursor:pointer;color:#333;white-space:nowrap}
+        .dropdown-menu button:hover{background:#f0f4ff}
+
+        /* 搜索栏 */
+        .search-bar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px;background:#fff;padding:10px 12px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+        .search-bar input,.search-bar select{padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none}
+        .search-bar input:focus,.search-bar select:focus{border-color:#3498DB}
+        .search-bar input{flex:1;min-width:140px}
+        .search-bar select{min-width:90px}
+        .search-bar .sep{color:#ccc;font-size:12px}
+
+        /* 统计卡片 */
+        .stats-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+        .stat-card{flex:1;min-width:100px;background:#fff;border-radius:8px;padding:10px 14px;box-shadow:0 1px 3px rgba(0,0,0,.06);text-align:center}
+        .stat-card .num{font-size:22px;font-weight:700;color:#1a1a2e}
+        .stat-card .label{font-size:11px;color:#888;margin-top:2px}
+        .stat-card.accent .num{color:#E74C3C}
+
+        /* 统计面板 */
+        .stats-panel{display:none;background:#fff;border-radius:8px;padding:14px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+        .stats-panel.show{display:block}
+        .stats-panel h3{font-size:14px;margin-bottom:8px;color:#555}
+        .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+        .stats-table{width:100%;border-collapse:collapse;font-size:12px}
+        .stats-table th,.stats-table td{text-align:left;padding:5px 8px;border-bottom:1px solid #eee}
+        .stats-table th{color:#888;font-weight:500}
+
+        /* 表格 */
+        .table-wrap{background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+        table{width:100%;border-collapse:collapse;font-size:13px}
+        thead{background:#f8f9fb}
+        th,td{padding:9px 10px;text-align:left;border-bottom:1px solid #eee;white-space:nowrap}
+        th{font-weight:600;color:#555;font-size:12px;text-transform:uppercase;letter-spacing:.3px}
+        tr:hover td{background:#f0f4ff}
+        td.amount{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+        td.actions{text-align:center}
+        .empty-state{padding:40px;text-align:center;color:#999;font-size:14px}
+
+        /* 分页 */
+        .pagination{display:flex;align-items:center;justify-content:center;gap:4px;padding:10px;background:#fff;border-top:1px solid #eee}
+        .pagination button{min-width:32px;height:30px;border:1px solid #ddd;background:#fff;border-radius:5px;cursor:pointer;font-size:12px;color:#555}
+        .pagination button:hover{background:#f0f0f0}
+        .pagination button.active{background:#3498DB;color:#fff;border-color:#3498DB}
+        .pagination button:disabled{opacity:.4;cursor:default}
+        .pagination .info{font-size:12px;color:#888;margin:0 8px}
+
+        /* 弹窗 */
+        .modal-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.4);justify-content:center;align-items:center;z-index:1000}
+        .modal-overlay.show{display:flex}
+        .modal{background:#fff;border-radius:10px;padding:20px;min-width:320px;max-width:500px;box-shadow:0 8px 30px rgba(0,0,0,.15)}
+        .modal h2{font-size:17px;margin-bottom:14px}
+        .modal .row{margin-bottom:10px;display:flex;flex-direction:column;gap:4px}
+        .modal .row label{font-size:12px;color:#666}
+        .modal .row input,.modal .row select{padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px}
+        .modal .modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+
+        /* 备份列表 */
+        .backup-list{list-style:none;max-height:200px;overflow-y:auto}
+        .backup-list li{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;font-size:12px}
+        .backup-list .size{color:#999;margin-left:8px}
+        .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:8px 18px;border-radius:20px;font-size:13px;z-index:2000;opacity:0;transition:opacity .3s}
+        .toast.show{opacity:1}
+
+        /* 进度条 */
+        .progress-wrap{display:none;margin:10px 0}
+        .progress-wrap.show{display:block}
+        .progress-bar{width:100%;height:6px;background:#e8e8e8;border-radius:3px;overflow:hidden}
+        .progress-bar .fill{height:100%;background:linear-gradient(90deg,#3498DB,#2ECC71);border-radius:3px;transition:width .3s ease;width:0%}
+        .progress-label{font-size:12px;color:#888;margin-top:4px;text-align:center}
+
+        @media(max-width:640px){
+            .search-bar{flex-direction:column;align-items:stretch}
+            .search-bar select{width:100%}
+            .topbar h1{font-size:17px}
+            th,td{padding:7px 6px;font-size:12px}
+            .btn-sm{padding:3px 8px;font-size:11px}
+        }
+
+        /* 拖拽上传提示 */
+        .drop-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(52,152,219,.08);z-index:9999;pointer-events:none;border:3px dashed #3498DB;box-sizing:border-box}
+        .drop-overlay.show{display:block}
+        .drop-overlay::after{content:'释放以识别报销图片';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:22px;color:#3498DB;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
     </style>
 </head>
 <body>
