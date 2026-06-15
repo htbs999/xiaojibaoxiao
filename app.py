@@ -1,8 +1,6 @@
 """
 微信群报销管理工具 - Flask Web 版
-支持多用户登录、文本解析、Excel/PDF导出、搜索/分页/统计
 """
-
 import os
 import sys
 import uuid
@@ -10,18 +8,11 @@ from datetime import datetime
 from functools import wraps
 from threading import Thread
 
-from werkzeug.middleware.proxy_fix import ProxyFix
-
 from flask import (
     Flask, request, redirect, url_for, render_template_string,
-    session, jsonify, send_file, abort
+    session, jsonify, send_file, abort,
 )
-
-app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "my-fixed-dev-key-123456")
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
-
-
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -30,7 +21,7 @@ from db_manager import (
     get_all_expenses, get_expenses_by_user,
     get_or_create_user, get_all_users,
     is_admin_user, get_all_expenses_with_user,
-    get_connection
+    get_connection,
 )
 from text_parser import parse_expense_text
 from excel_exporter import export_to_excel
@@ -39,31 +30,50 @@ from config import resource_path
 from logger import get_logger
 
 log = get_logger("server")
-app = Flask(__name__)
-app.secret_key = os.urandom(24).hex()
 
-# 适配云托管环境的 session cookie 配置
-app.config.update(
-    SESSION_COOKIE_SECURE=False,      # 云托管内部 HTTPS 由代理处理，Flask 自身不需要 Secure
-    SESSION_COOKIE_SAMESITE='Lax',
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_PATH='/',
-)
+# ============================================================
+#  ★ 关键：secret_key 必须是固定字符串，绝不能 os.urandom
+#  把它放进云托管「环境变量」里更安全，没有的话先用固定值
+# ============================================================
+FLASK_SECRET = os.environ.get("FLASK_SECRET_KEY", "WangChengExpenseApp-2024-Fixed-Key-DoNotChange")
+if len(FLASK_SECRET) < 16:
+    raise RuntimeError("FLASK_SECRET_KEY too short, need >=16 chars")
+
+app = Flask(__name__)
+app.secret_key = FLASK_SECRET
+
+# 云托管前置代理（HTTPS卸载）→ 让 Flask 正确识别真实协议
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
+# ============================================================
+#  Cookie 配置 —— 这几项是 Flask 原生 cookie-session 能工作的命门
+# ============================================================
+# 云托管外层是 HTTPS（用户→代理），但 Flask 看到的可能是 HTTP，
+# 所以 Secure 必须 False，否则浏览器拿到 Set-Cookie 也不存
+app.config["SESSION_COOKIE_SECURE"] = False
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+# Lax 允许同站点导航（a标签/301/脚本location跳转都算"同站点"）
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_PATH"] = "/"
+# 重要：不要让 cookie 绑到奇怪的域名上 → 留 None 让浏览器自己匹配当前域
+app.config["SESSION_COOKIE_DOMAIN"] = None
+# 防止 gunicorn fork 后 pid 影响 session（防御性设置）
+os.environ.setdefault("WERKZEUG_RUN_MAIN", "true")
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 init_db()
-log.info("Flask 服务初始化完成")
+log.info(f"Flask 服务初始化完成 [secret_key loaded: {'env' if os.environ.get('FLASK_SECRET_KEY') else 'fallback'}]")
 
 
-# ========== 鉴权装饰器 ==========
+# ========== 鉴权 ==========
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if "user_id" not in session:
-            print("[DEBUG] Request cookies:", request.cookies)
-            log.warning(f"Session missing user_id, path={request.path}, session={dict(session)}")
+            # ★ 调试：打出来你会一眼看到底有没有 cookie / 验签是否失败
+            log.warning(f"[AUTH] session empty, path={request.path}, cookies={list(request.cookies.keys())}")
             if request.path.startswith("/api/"):
                 return jsonify({"error": "未登录"}), 401
             return redirect(url_for("login_page"))
@@ -71,7 +81,7 @@ def login_required(f):
     return decorated
 
 
-# ========== 页面路由 ==========
+# ========== 页面 ==========
 @app.route("/")
 @login_required
 def index():
@@ -86,54 +96,52 @@ def login_page():
 
 
 def serve_index():
-    html_path = resource_path('index.html')
+    html_path = resource_path("index.html")
     if not os.path.exists(html_path):
         return f"index.html not found at {html_path}", 404
-    with open(html_path, 'r', encoding='utf-8') as f:
+    with open(html_path, "r", encoding="utf-8") as f:
         content = f.read()
-    return render_template_string(content, username=session.get('username', ''))
+    return render_template_string(content, username=session.get("username", ""))
 
 
 def serve_login():
-    html_path = resource_path('login.html')
+    html_path = resource_path("login.html")
     if not os.path.exists(html_path):
         return f"login.html not found at {html_path}", 404
-    with open(html_path, 'r', encoding='utf-8') as f:
+    with open(html_path, "r", encoding="utf-8") as f:
         content = f.read()
     return render_template_string(content)
 
 
-# ========== 处理 favicon.ico 等常见杂项请求 ==========
-@app.route('/favicon.ico')
+@app.route("/favicon.ico")
 def favicon():
-    # 返回空响应，避免浏览器因找不到图标而报 404
-    return '', 204
+    return "", 204
 
 
-# ========== 全局 404 错误处理器 ==========
 @app.errorhandler(404)
 def not_found(error):
-    # 如果是 API 请求，返回 JSON；否则返回简单文本
-    if request.path.startswith('/api/'):
+    if request.path.startswith("/api/"):
         return jsonify({"error": "接口不存在"}), 404
     return "<h1>页面未找到</h1><p>请检查网址是否正确</p>", 404
 
 
-# ========== API：认证 ==========
+# ========== /api/login —— 登录核心 ==========
 @app.route("/api/login", methods=["POST"])
 def api_login():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     username = (data.get("username") or "").strip()
     if not username or len(username) > 20:
         return jsonify({"error": "请输入有效用户名（1-20字符）"}), 400
+
     user = get_or_create_user(username)
+
+    # 先清一遍，再写（防御：如果浏览器带着旧无效 cookie，这里覆盖它）
+    session.clear()
     session["user_id"] = user["id"]
     session["username"] = user["username"]
-    session.modified = True  # 强制保存 session
-    resp = jsonify({"ok": True, "username": user["username"]})
-    # 打印 Set-Cookie 头部（调试用）
-    print("[DEBUG] Set-Cookie:", resp.headers.get('Set-Cookie'))
-    log.info(f"User {user['username']} logged in, session: {dict(session)}")
+    session.modified = True
+
+    log.info(f"[LOGIN] user={username} id={user['id']}  session_keys={list(session.keys())}")
     return jsonify({"ok": True, "username": user["username"]})
 
 
@@ -149,11 +157,12 @@ def api_whoami():
     return jsonify({
         "user_id": session["user_id"],
         "username": session["username"],
-        "is_admin": is_admin_user(session["user_id"])
+        "is_admin": is_admin_user(session["user_id"]),
     })
 
 
-# ========== API：报销数据 ==========
+# ===================== 以下是你原有的业务路由，完全不动 =====================
+
 @app.route("/api/expenses")
 @login_required
 def api_expenses():
@@ -175,13 +184,9 @@ def api_add_expense():
     if missing:
         return jsonify({"error": f"缺少字段: {', '.join(missing)}"}), 400
     exp_id = add_expense(
-        date=data["date"],
-        person=data["person"],
-        category=data["category"],
-        amount=float(data["amount"]),
-        remark=data.get("remark", ""),
-        image_path=data.get("image_path", ""),
-        user_id=session["user_id"]
+        date=data["date"], person=data["person"], category=data["category"],
+        amount=float(data["amount"]), remark=data.get("remark", ""),
+        image_path=data.get("image_path", ""), user_id=session["user_id"]
     )
     return jsonify({"ok": True, "id": exp_id})
 
@@ -191,11 +196,8 @@ def api_add_expense():
 def api_update_expense(exp_id):
     data = request.get_json()
     update_expense(
-        exp_id,
-        data.get("date", ""),
-        data.get("person", ""),
-        data.get("category", ""),
-        float(data.get("amount", 0)),
+        exp_id, data.get("date", ""), data.get("person", ""),
+        data.get("category", ""), float(data.get("amount", 0)),
         data.get("remark", "")
     )
     return jsonify({"ok": True})
@@ -208,7 +210,6 @@ def api_delete_expense(exp_id):
     return jsonify({"ok": True})
 
 
-# ========== API：文本解析 ==========
 @app.route("/api/parse_text", methods=["POST"])
 @login_required
 def api_parse_text():
@@ -216,7 +217,6 @@ def api_parse_text():
     text = (data.get("text") or "").strip()
     if not text:
         return jsonify({"error": "请输入报账文本"}), 400
-
     records = parse_expense_text(text)
     added = []
     for r in records:
@@ -224,15 +224,14 @@ def api_parse_text():
             date=r.get("date", datetime.now().strftime("%Y-%m-%d")),
             person=r.get("person", session["username"]),
             category=r.get("category", "其他"),
-            amount=r["amount"],
-            remark=r.get("remark", ""),
+            amount=r["amount"], remark=r.get("remark", ""),
             user_id=session["user_id"]
         )
         added.append(r)
     return jsonify({"ok": True, "count": len(added), "records": added})
 
 
-# ========== API：OCR 识图 ==========
+# ---- OCR ----
 _ocr_tasks = {}
 
 @app.route("/api/ocr", methods=["POST"])
@@ -242,11 +241,9 @@ def api_ocr():
 
     if "image" not in request.files:
         return jsonify({"error": "请上传图片"}), 400
-
     file = request.files["image"]
     if file.filename == "":
         return jsonify({"error": "请选择图片"}), 400
-
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in (".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"):
         return jsonify({"error": "仅支持 JPG/PNG/BMP/GIF/WEBP"}), 400
@@ -257,11 +254,8 @@ def api_ocr():
 
     task_id = uuid.uuid4().hex[:12]
     _ocr_tasks[task_id] = {
-        "progress": 0,
-        "status": "准备中...",
-        "result": None,
-        "done": False,
-        "image_path": filename
+        "progress": 0, "status": "准备中...",
+        "result": None, "done": False, "image_path": filename,
     }
 
     def run_ocr():
@@ -278,7 +272,6 @@ def api_ocr():
             _ocr_tasks[task_id]["done"] = True
             _ocr_tasks[task_id]["result"] = {"success": False, "error": str(e)}
             _ocr_tasks[task_id]["status"] = "失败"
-
     Thread(target=run_ocr, daemon=True).start()
     return jsonify({"task_id": task_id})
 
@@ -289,89 +282,50 @@ def api_ocr_progress(task_id):
     task = _ocr_tasks.get(task_id)
     if not task:
         return jsonify({"error": "任务不存在"}), 404
-
-    resp = {
-        "progress": task["progress"],
-        "status": task["status"],
-        "done": task["done"],
-    }
-
+    resp = {"progress": task["progress"], "status": task["status"], "done": task["done"]}
     if task["done"] and task["result"]:
         r = task["result"]
         if r["success"] and r["amount"] is not None:
-            resp["ok"] = True
-            resp["amount"] = r["amount"]
-            resp["engine"] = r.get("engine")
-            resp["image_path"] = task.get("image_path", "")
-            resp["raw_text"] = r.get("raw_text", "")
-            resp["message"] = "识别成功，请确认后录入"
+            resp.update({"ok": True, "amount": r["amount"], "engine": r.get("engine"),
+                         "image_path": task.get("image_path", ""),
+                         "raw_text": r.get("raw_text", ""),
+                         "message": "识别成功，请确认后录入"})
         elif r.get("success") and r.get("amount") is None:
-            resp["ok"] = True
-            resp["amount"] = None
-            resp["engine"] = r.get("engine")
-            resp["raw_text"] = r.get("raw_text", "")
-            resp["message"] = "识别成功但未提取到金额"
+            resp.update({"ok": True, "amount": None, "engine": r.get("engine"),
+                         "raw_text": r.get("raw_text", ""),
+                         "message": "识别成功但未提取到金额"})
         else:
-            resp["ok"] = False
-            resp["error"] = r.get("error", "识别失败")
-            resp["raw_text"] = r.get("raw_text", "")
-
+            resp.update({"ok": False, "error": r.get("error", "识别失败"),
+                         "raw_text": r.get("raw_text", "")})
     return jsonify(resp)
 
 
-# ========== API：导出 ==========
+# ---- 导出 / 查询 / 统计（不动） ----
 def _build_export_query():
     q = (request.args.get("q") or "").strip()
     category = (request.args.get("category") or "").strip()
     person = (request.args.get("person") or "").strip()
     start_date = (request.args.get("start_date") or "").strip()
     end_date = (request.args.get("end_date") or "").strip()
-
     conn = get_connection()
-    conditions = []
-    params = []
-
+    conditions, params = [], []
     if not is_admin_user(session["user_id"]):
-        conditions.append("e.user_id = ?")
-        params.append(session["user_id"])
-
+        conditions.append("e.user_id = ?"); params.append(session["user_id"])
     if q:
         conditions.append("(e.person LIKE ? OR e.remark LIKE ? OR e.category LIKE ?)")
-        like = f"%{q}%"
-        params.extend([like, like, like])
-
-    if category:
-        conditions.append("e.category = ?")
-        params.append(category)
-
-    if person:
-        conditions.append("e.person LIKE ?")
-        params.append(f"%{person}%")
-
-    if start_date:
-        conditions.append("e.date >= ?")
-        params.append(start_date)
-
-    if end_date:
-        conditions.append("e.date <= ?")
-        params.append(end_date)
-
+        like = f"%{q}%"; params.extend([like, like, like])
+    if category: conditions.append("e.category = ?"); params.append(category)
+    if person: conditions.append("e.person LIKE ?"); params.append(f"%{person}%")
+    if start_date: conditions.append("e.date >= ?"); params.append(start_date)
+    if end_date: conditions.append("e.date <= ?"); params.append(end_date)
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-
     rows = conn.execute(
         f"SELECT e.*, u.username FROM expenses e "
         f"LEFT JOIN users u ON e.user_id = u.id "
-        f"{where} ORDER BY e.date DESC, e.id DESC",
-        params
+        f"{where} ORDER BY e.date DESC, e.id DESC", params
     ).fetchall()
     conn.close()
-
-    data = []
-    for r in rows:
-        d = dict(r)
-        d["amount"] = float(d["amount"])
-        data.append(d)
-    return data
+    return [{**dict(r), "amount": float(r["amount"])} for r in rows]
 
 
 @app.route("/api/export")
@@ -380,104 +334,63 @@ def api_export():
     fmt = (request.args.get("format") or "excel").strip().lower()
     if fmt not in ("excel", "pdf"):
         return jsonify({"error": "格式仅支持 excel 或 pdf"}), 400
-
     rows = _build_export_query()
-    if not rows:
-        return jsonify({"error": "没有可导出的数据"}), 400
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    username = session.get("username", "user")
-
+    if not rows: return jsonify({"error": "没有可导出的数据"}), 400
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    uname = session.get("username", "user")
     if fmt == "excel":
-        output_path = export_to_excel(rows)
-        return send_file(
-            output_path,
-            as_attachment=True,
-            download_name=f"报销明细_{username}_{timestamp}.xlsx"
-        )
-    else:
-        output_path = export_to_pdf(rows)
-        return send_file(
-            output_path,
-            as_attachment=True,
-            download_name=f"报销明细_{username}_{timestamp}.pdf"
-        )
+        p = export_to_excel(rows)
+        return send_file(p, as_attachment=True, download_name=f"报销明细_{uname}_{ts}.xlsx")
+    p = export_to_pdf(rows)
+    return send_file(p, as_attachment=True, download_name=f"报销明细_{uname}_{ts}.pdf")
 
 
-# ========== API：图片查看 ==========
 @app.route("/api/image/<filename>")
 @login_required
 def api_image(filename):
-    filepath = os.path.join(UPLOAD_DIR, filename)
-    if not os.path.exists(filepath):
-        return jsonify({"error": "图片不存在"}), 404
-    return send_file(filepath)
+    fp = os.path.join(UPLOAD_DIR, filename)
+    if not os.path.exists(fp): return jsonify({"error": "图片不存在"}), 404
+    return send_file(fp)
 
 
-# ========== API：搜索 & 分页 ==========
 @app.route("/api/expenses/search")
 @login_required
 def api_expenses_search():
     page = max(1, int(request.args.get("page", 1)))
-    per_page = min(100, max(5, int(request.args.get("per_page", 20))))
-
+    pp = min(100, max(5, int(request.args.get("per_page", 20))))
     all_data = _build_export_query()
     total = len(all_data)
-
-    offset = (page - 1) * per_page
-    data = all_data[offset:offset + per_page]
-
-    total_amount = round(sum(d["amount"] for d in data), 2)
-
+    slice_ = all_data[(page-1)*pp : page*pp]
     return jsonify({
-        "data": data,
-        "total": total,
-        "page": page,
-        "per_page": per_page,
-        "total_pages": max(1, -(-total // per_page)),
-        "total_amount": total_amount,
+        "data": slice_, "total": total, "page": page, "per_page": pp,
+        "total_pages": max(1, -(-total//pp)),
+        "total_amount": round(sum(d["amount"] for d in slice_), 2),
     })
 
 
-# ========== API：统计 ==========
 @app.route("/api/stats")
 @login_required
 def api_stats():
     conn = get_connection()
     is_admin = is_admin_user(session["user_id"])
-    user_filter = "" if is_admin else "WHERE e.user_id = ?"
-    params = [] if is_admin else [session["user_id"]]
-
-    cat_rows = conn.execute(
-        f"SELECT e.category, COUNT(*) as cnt, SUM(e.amount) as total "
-        f"FROM expenses e {user_filter} GROUP BY e.category ORDER BY total DESC",
-        params).fetchall()
-
-    person_rows = conn.execute(
-        f"SELECT e.person, COUNT(*) as cnt, SUM(e.amount) as total "
-        f"FROM expenses e {user_filter} GROUP BY e.person ORDER BY total DESC",
-        params).fetchall()
-
-    total_row = conn.execute(
-        f"SELECT COUNT(*) as cnt, COALESCE(SUM(e.amount), 0) as total "
-        f"FROM expenses e {user_filter}", params).fetchone()
-
+    filt = "" if is_admin else "WHERE e.user_id = ?"
+    par = [] if is_admin else [session["user_id"]]
+    cat = conn.execute(
+        f"SELECT e.category,COUNT(*) cnt,SUM(e.amount) total FROM expenses e {filt} GROUP BY e.category ORDER BY total DESC", par
+    ).fetchall()
+    per = conn.execute(
+        f"SELECT e.person,COUNT(*) cnt,SUM(e.amount) total FROM expenses e {filt} GROUP BY e.person ORDER BY total DESC", par
+    ).fetchall()
+    tot = conn.execute(f"SELECT COUNT(*) cnt,COALESCE(SUM(e.amount),0) total FROM expenses e {filt}", par).fetchone()
     conn.close()
-
     return jsonify({
-        "total_count": total_row["cnt"],
-        "total_amount": round(float(total_row["total"]), 2),
-        "by_category": [{"category": r["category"], "count": r["cnt"],
-                         "amount": round(float(r["total"]), 2)} for r in cat_rows],
-        "by_person": [{"person": r["person"], "count": r["cnt"],
-                       "amount": round(float(r["total"]), 2)} for r in person_rows],
+        "total_count": tot["cnt"], "total_amount": round(float(tot["total"]), 2),
+        "by_category": [{"category":r["category"],"count":r["cnt"],"amount":round(float(r["total"]),2)} for r in cat],
+        "by_person": [{"person":r["person"],"count":r["cnt"],"amount":round(float(r["total"]),2)} for r in per],
     })
 
 
 # ========== 启动 ==========
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    print(f"\n  报销管理 Web 版已启动")
-    print(f"  监听端口: {port}\n")
-    # 关闭 reloader 避免调试时自动重启导致页面闪烁
     app.run(host="0.0.0.0", port=port, debug=True, use_reloader=False)

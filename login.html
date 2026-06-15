@@ -42,6 +42,7 @@
 </div>
 
 <script>
+document.cookie = "session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
 const inp = document.getElementById("username");
 inp.focus();
 inp.addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
