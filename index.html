@@ -5,11 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>微信群报销管理</title>
     <style>
-        /* 样式保持不变，省略以节省篇幅，实际使用时请保留原有完整样式 */
+        /* ====== 样式部分完全保留你原有的，此处省略以节省篇幅 ====== */
+        /* 实际使用时请保留你原有的全部样式 */
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f5f6fa;color:#2c3e50;min-height:100vh}
         .app{padding:12px;max-width:1100px;margin:0 auto}
-        /* 其余样式完全沿用你已有的，此处不重复粘贴，但最终文件应包含全部样式 */
+        /* …… 其余样式完全沿用你已有的，此处不重复粘贴，但最终文件应包含全部样式 */
     </style>
 </head>
 <body>
@@ -149,25 +150,7 @@
 </div>
 
 <script>
-// ---- 状态 ----
-let currentPage = 1;
-let totalPages = 1;
-let editingId = null;
-let isAdmin = false;
-let searchTimer = null;
-const PER_PAGE = 20;
-
-// ---- Token 工具函数 ----
-function getToken() {
-    return localStorage.getItem('token');
-}
-
-function authHeader() {
-    const token = getToken();
-    return token ? { 'Authorization': 'Bearer ' + token } : {};
-}
-
-// ---- 通用 fetch 封装（自动添加 token） ----
+// ====== 统一请求函数（自动携带 Token） ======
 function apiFetch(url, options = {}) {
     const token = localStorage.getItem('token');
     const headers = {
@@ -180,6 +163,7 @@ function apiFetch(url, options = {}) {
     return fetch(url, { ...options, headers }).then(res => {
         if (res.status === 401) {
             localStorage.removeItem('token');
+            localStorage.removeItem('username');
             window.location = '/login';
             throw new Error('未登录');
         }
@@ -187,10 +171,18 @@ function apiFetch(url, options = {}) {
     });
 }
 
-// ---- 初始化 ----
+// ====== 状态变量 ======
+let currentPage = 1;
+let totalPages = 1;
+let editingId = null;
+let isAdmin = false;
+let searchTimer = null;
+const PER_PAGE = 20;
+
+// ====== 初始化 ======
 async function init() {
-    // 检查 token 是否存在
-    if (!getToken()) {
+    const token = localStorage.getItem('token');
+    if (!token) {
         window.location = '/login';
         return;
     }
@@ -206,7 +198,7 @@ function checkAdmin() {
     }).catch(()=>{});
 }
 
-// ---- 搜索/分页 ----
+// ====== 搜索/分页 ======
 async function search(page=1) {
     currentPage = page;
     const q = document.getElementById('searchQ').value.trim();
@@ -284,7 +276,7 @@ function clearFilters() {
     search(1);
 }
 
-// ---- 统计 ----
+// ====== 统计 ======
 async function loadStats() {
     try {
         const res = await apiFetch('/api/stats');
@@ -314,7 +306,7 @@ function showStats() {
 }
 function hideStats() { document.getElementById('statsPanel').classList.remove('show'); }
 
-// ---- 筛选选项 ----
+// ====== 筛选选项 ======
 async function loadFilterOptions() {
     try {
         const res = await apiFetch('/api/stats');
@@ -330,7 +322,7 @@ async function loadFilterOptions() {
     } catch(e) {}
 }
 
-// ---- 编辑 ----
+// ====== 编辑 ======
 function openEdit(id, date, person, category, amount, remark) {
     editingId = id;
     document.getElementById('editDate').value = date;
@@ -363,7 +355,7 @@ async function del(id) {
     toast('已删除');
 }
 
-// ---- 快捷录入 ----
+// ====== 快捷录入 ======
 let parsedRecords = [];
 function showQuickAdd() { document.getElementById('quickAddModal').classList.add('show'); }
 function closeQuickAdd() {
@@ -424,8 +416,12 @@ async function submitOcr(file) {
     const fd = new FormData(); fd.append('image', file);
 
     try {
-        // 注意：FormData 不需要 Content-Type，fetch 会自动设置 multipart/form-data
-        const res = await apiFetch('/api/ocr', {method:'POST', body: fd, headers: {} }); // 不设 Content-Type
+        // 注意：FormData 不需要 Content-Type，apiFetch 会设置，但上传文件时不能设置 Content-Type
+        // 这里我们手动构造 fetch，避免 apiFetch 自动添加的 JSON Content-Type
+        const token = localStorage.getItem('token');
+        const headers = {};
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+        const res = await fetch('/api/ocr', { method:'POST', body: fd, headers });
         const d = await res.json();
         if(d.error) { toast(d.error); btn.disabled = false; btn.textContent = '识别并录入'; return; }
 
@@ -526,18 +522,26 @@ async function confirmOcr() {
     }
 }
 
-// ---- 辅助 ----
+// ====== 辅助 ======
 function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function escAttr(s) { return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;'); }
 function viewImage(path) {
-    // 图片查看也需要鉴权，可以通过添加 token 作为 query 参数（后端需支持）
-    const token = getToken();
-    const imgSrc = '/api/image/' + encodeURIComponent(path.split(/[/\\]/).pop()) + '?token=' + encodeURIComponent(token);
-    document.getElementById('imageViewer').src = imgSrc;
-    document.getElementById('imageOverlay').classList.add('show');
+    // 通过 apiFetch 获取图片 blob，再用 object URL 展示
+    const filename = path.split(/[/\\]/).pop();
+    apiFetch('/api/image/' + encodeURIComponent(filename))
+        .then(res => res.blob())
+        .then(blob => {
+            const url = URL.createObjectURL(blob);
+            document.getElementById('imageViewer').src = url;
+            document.getElementById('imageOverlay').classList.add('show');
+        })
+        .catch(() => toast('图片加载失败'));
 }
 function closeImage() {
     document.getElementById('imageOverlay').classList.remove('show');
+    // 释放 object URL
+    const img = document.getElementById('imageViewer');
+    if (img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
 }
 function toast(msg) {
     const t = document.getElementById('toast');
@@ -551,7 +555,7 @@ async function logout() {
     window.location='/login';
 }
 
-// ---- 导出（改用 fetch + blob 下载，避免 window.open 无法携带 header）----
+// ====== 导出（改用 apiFetch + blob 下载） ======
 let _exportFilters = null;
 function toggleExport() {
     document.getElementById('exportMenu').classList.toggle('show');
@@ -633,7 +637,7 @@ function confirmPdfDownload() {
     doExport('pdf');
 }
 
-// 拖拽图片上传（需要带上 token）
+// ====== 拖拽图片上传 ======
 let dragCounter = 0;
 const dropOverlay = document.getElementById('dropOverlay');
 document.addEventListener('dragenter', function(e) {
