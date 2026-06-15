@@ -2,12 +2,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 安装系统依赖（包括 Tesseract OCR 和中文字体）
+# 安装系统依赖（仅 Tesseract 和中文字体，OpenCV headless 不需要图形库）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-chi-sim \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 Python 依赖

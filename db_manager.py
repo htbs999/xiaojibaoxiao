@@ -92,14 +92,28 @@ def get_all_expenses():
 
 
 def get_or_create_user(username):
+    """获取或创建用户，若用户名为 admin 则自动设为管理员"""
     conn = get_connection()
-    row = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
-    if row is None:
-        conn.execute("INSERT INTO users (username) VALUES (?)", (username,))
+    user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+    if user:
+        # 如果用户已存在但不是管理员，且用户名为 admin，则升级为管理员
+        if username.lower() == "admin" and user["is_admin"] == 0:
+            conn.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (user["id"],))
+            conn.commit()
+            user = conn.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone()
+        conn.close()
+        return dict(user)
+    else:
+        # 创建新用户，如果是 admin 则 is_admin=1，否则 is_admin=0
+        is_admin = 1 if username.lower() == "admin" else 0
+        cursor = conn.execute(
+            "INSERT INTO users (username, is_admin) VALUES (?, ?)",
+            (username, is_admin)
+        )
         conn.commit()
-        row = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
-    conn.close()
-    return dict(row)
+        user_id = cursor.lastrowid
+        conn.close()
+        return {"id": user_id, "username": username, "is_admin": is_admin}
 
 
 def get_all_users():
