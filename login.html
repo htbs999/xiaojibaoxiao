@@ -40,28 +40,28 @@ button:active{opacity:.85}
   document.getElementById("username").addEventListener("keydown",function(e){ if(e.key==="Enter") doLogin(); });
 })();
 
-async function doLogin(){
-  var name = document.getElementById("username").value.trim();
-  if(!name) return;
-  var btn = event.currentTarget || document.querySelector("button");
-  try {
-    var r = await fetch("/api/login", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({username: name})
-    });
-    var d = await r.json();
-    if(r.ok && d.ok && d.token){
-      // ✅ 关键：存真 token
-      localStorage.setItem("token", d.token);
-      localStorage.setItem("username", d.username || name);
-      location.replace("/");
-    } else {
-      alert(d.error || "登录失败");
+async function doLogin() {
+    const name = inp.value.trim();
+    if (!name) return inp.focus();
+    try {
+        const r = await fetch("/api/login", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({username: name})
+        });
+        const d = await r.json();
+        if (r.ok && d.token) {
+            // ★ 这两行是救命稻草
+            localStorage.setItem('token', d.token);
+            localStorage.setItem('username', d.username || name);
+            window.location.replace("/");
+        } else {
+            alert(d?.error || "登录失败，后端未返回 token");
+            console.error("LOGIN FAILED", d);
+        }
+    } catch (e) {
+        alert("连接失败");
     }
-  } catch(e){
-    alert("连接失败，请检查服务是否启动");
-  }
 }
 </script>
 </body>

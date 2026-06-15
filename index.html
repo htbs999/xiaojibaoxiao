@@ -168,23 +168,23 @@ function authHeader() {
 }
 
 // ---- 通用 fetch 封装（自动添加 token） ----
-async function apiFetch(url, options = {}) {
+function apiFetch(url, options = {}) {
+    const token = localStorage.getItem('token');
     const headers = {
         'Content-Type': 'application/json',
-        ...authHeader(),
         ...options.headers
     };
-    const res = await fetch(url, {
-        ...options,
-        headers: headers
-    });
-    if (res.status === 401) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('username');
-        window.location = '/login';
-        throw new Error('未登录');
+    if (token) {
+        headers['Authorization'] = 'Bearer ' + token;
     }
-    return res;
+    return fetch(url, { ...options, headers }).then(res => {
+        if (res.status === 401) {
+            localStorage.removeItem('token');
+            window.location = '/login';
+            throw new Error('未登录');
+        }
+        return res;
+    });
 }
 
 // ---- 初始化 ----
