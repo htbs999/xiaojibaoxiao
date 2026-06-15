@@ -62,6 +62,7 @@ def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if "user_id" not in session:
+            print("[DEBUG] Request cookies:", request.cookies)
             log.warning(f"Session missing user_id, path={request.path}, session={dict(session)}")
             if request.path.startswith("/api/"):
                 return jsonify({"error": "未登录"}), 401
@@ -129,6 +130,9 @@ def api_login():
     session["user_id"] = user["id"]
     session["username"] = user["username"]
     session.modified = True  # 强制保存 session
+    resp = jsonify({"ok": True, "username": user["username"]})
+    # 打印 Set-Cookie 头部（调试用）
+    print("[DEBUG] Set-Cookie:", resp.headers.get('Set-Cookie'))
     log.info(f"User {user['username']} logged in, session: {dict(session)}")
     return jsonify({"ok": True, "username": user["username"]})
 
