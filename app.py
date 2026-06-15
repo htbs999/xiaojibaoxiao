@@ -1,16 +1,17 @@
 """
-微信群报销管理工具 - Flask Web 版
+微信群报销管理工具 - Flask Web 版 (Token 鉴权)
 """
 import os
 import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 from threading import Thread
 
+import jwt
 from flask import (
     Flask, request, redirect, url_for, render_template_string,
-    session, jsonify, send_file, abort,
+    session, jsonify, send_file, abort, g
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -32,68 +33,102 @@ from logger import get_logger
 log = get_logger("server")
 
 # ============================================================
-#  ★ 关键：secret_key 必须是固定字符串，绝不能 os.urandom
-#  把它放进云托管「环境变量」里更安全，没有的话先用固定值
+#  JWT 密钥配置（务必更换为你的随机密钥）
 # ============================================================
-FLASK_SECRET = os.environ.get("FLASK_SECRET_KEY", "WangChengExpenseApp-2024-Fixed-Key-DoNotChange")
-if len(FLASK_SECRET) < 16:
-    raise RuntimeError("FLASK_SECRET_KEY too short, need >=16 chars")
+JWT_SECRET = os.environ.get("JWT_SECRET_KEY", "WangChengExpenseApp-JWT-Secret-2024!@#")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRATION_HOURS = 168  # 7天
 
+# ============================================================
+#  Flask 基础配置
+# ============================================================
 app = Flask(__name__)
-app.secret_key = FLASK_SECRET
-
-# 云托管前置代理（HTTPS卸载）→ 让 Flask 正确识别真实协议
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "fallback-secret-do-not-use-in-production")
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
-# ============================================================
-#  Cookie 配置 —— 这几项是 Flask 原生 cookie-session 能工作的命门
-# ============================================================
-# 云托管外层是 HTTPS（用户→代理），但 Flask 看到的可能是 HTTP，
-# 所以 Secure 必须 False，否则浏览器拿到 Set-Cookie 也不存
+# Cookie 相关配置不再需要，因为我们不再使用 Session
+# 但保留以防万一（不影响 Token 鉴权）
 app.config["SESSION_COOKIE_SECURE"] = False
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-# Lax 允许同站点导航（a标签/301/脚本location跳转都算"同站点"）
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_PATH"] = "/"
-# 重要：不要让 cookie 绑到奇怪的域名上 → 留 None 让浏览器自己匹配当前域
 app.config["SESSION_COOKIE_DOMAIN"] = None
-# 防止 gunicorn fork 后 pid 影响 session（防御性设置）
-os.environ.setdefault("WERKZEUG_RUN_MAIN", "true")
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 init_db()
-log.info(f"Flask 服务初始化完成 [secret_key loaded: {'env' if os.environ.get('FLASK_SECRET_KEY') else 'fallback'}]")
+log.info("Flask 服务初始化完成 [Token 鉴权模式]")
 
 
-# ========== 鉴权 ==========
+# ========== JWT 工具函数 ==========
+def create_token(user_id, username):
+    """生成 JWT Token"""
+    payload = {
+        'user_id': user_id,
+        'username': username,
+        'exp': datetime.utcnow() + timedelta(hours=JWT_EXPIRATION_HOURS),
+        'iat': datetime.utcnow()
+    }
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return token
+
+def verify_token(token):
+    """验证 Token，成功返回 payload，失败返回 None"""
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return payload
+    except jwt.ExpiredSignatureError:
+        log.warning("Token 已过期")
+        return None
+    except jwt.InvalidTokenError as e:
+        log.warning(f"Token 无效: {e}")
+        return None
+
+
+# ========== 鉴权装饰器（同时支持 Token 和 Session，便于过渡） ==========
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if "user_id" not in session:
-            # ★ 调试：打出来你会一眼看到底有没有 cookie / 验签是否失败
-            log.warning(f"[AUTH] session empty, path={request.path}, cookies={list(request.cookies.keys())}")
-            if request.path.startswith("/api/"):
-                return jsonify({"error": "未登录"}), 401
-            return redirect(url_for("login_page"))
-        return f(*args, **kwargs)
+        # 1️⃣ 优先从 Authorization 头中提取 Token
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+            payload = verify_token(token)
+            if payload:
+                # 将用户信息存入 g 对象，供视图函数使用
+                g.user_id = payload['user_id']
+                g.username = payload['username']
+                return f(*args, **kwargs)
+            else:
+                # Token 无效或过期
+                return jsonify({"error": "登录已过期，请重新登录"}), 401
+
+        # 2️⃣ 回退到 Session（兼容旧的客户端，未来可删除）
+        if "user_id" in session:
+            g.user_id = session["user_id"]
+            g.username = session.get("username", "")
+            return f(*args, **kwargs)
+
+        # 3️⃣ 均未通过
+        log.warning(f"[AUTH] 未登录请求 path={request.path}")
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "未登录"}), 401
+        return redirect(url_for("login_page"))
+
     return decorated
 
 
-# ========== 页面 ==========
+# ========== 页面路由（保持不变） ==========
 @app.route("/")
 @login_required
 def index():
     return serve_index()
 
-
 @app.route("/login")
 def login_page():
-    if "user_id" in session:
-        return redirect(url_for("index"))
+    # 不再检查 Session，因为用户可能通过 Token 登录后直接访问首页
     return serve_login()
-
 
 def serve_index():
     html_path = resource_path("index.html")
@@ -101,8 +136,7 @@ def serve_index():
         return f"index.html not found at {html_path}", 404
     with open(html_path, "r", encoding="utf-8") as f:
         content = f.read()
-    return render_template_string(content, username=session.get("username", ""))
-
+    return render_template_string(content, username=g.get("username", ""))
 
 def serve_login():
     html_path = resource_path("login.html")
@@ -112,11 +146,9 @@ def serve_login():
         content = f.read()
     return render_template_string(content)
 
-
 @app.route("/favicon.ico")
 def favicon():
     return "", 204
-
 
 @app.errorhandler(404)
 def not_found(error):
@@ -125,7 +157,7 @@ def not_found(error):
     return "<h1>页面未找到</h1><p>请检查网址是否正确</p>", 404
 
 
-# ========== /api/login —— 登录核心 ==========
+# ========== 登录/登出（Token 核心） ==========
 @app.route("/api/login", methods=["POST"])
 def api_login():
     data = request.get_json(silent=True) or {}
@@ -135,41 +167,41 @@ def api_login():
 
     user = get_or_create_user(username)
 
-    # 先清一遍，再写（防御：如果浏览器带着旧无效 cookie，这里覆盖它）
-    session.clear()
-    session["user_id"] = user["id"]
-    session["username"] = user["username"]
-    session.modified = True
+    # 生成 Token 并返回（不再使用 Session）
+    token = create_token(user["id"], user["username"])
 
-    log.info(f"[LOGIN] user={username} id={user['id']}  session_keys={list(session.keys())}")
-    return jsonify({"ok": True, "username": user["username"]})
-
+    log.info(f"[LOGIN] user={username} id={user['id']} token issued")
+    return jsonify({
+        "ok": True,
+        "token": token,
+        "username": user["username"]
+    })
 
 @app.route("/api/logout", methods=["POST"])
+@login_required
 def api_logout():
-    session.clear()
+    # Token 是无状态的，无需服务端销毁，前端清除即可
     return jsonify({"ok": True})
-
 
 @app.route("/api/whoami")
 @login_required
 def api_whoami():
     return jsonify({
-        "user_id": session["user_id"],
-        "username": session["username"],
-        "is_admin": is_admin_user(session["user_id"]),
+        "user_id": g.user_id,
+        "username": g.username,
+        "is_admin": is_admin_user(g.user_id),
     })
 
 
-# ===================== 以下是你原有的业务路由，完全不动 =====================
+# ===================== 以下业务路由（仅将 session 替换为 g） =====================
 
 @app.route("/api/expenses")
 @login_required
 def api_expenses():
-    if is_admin_user(session["user_id"]):
+    if is_admin_user(g.user_id):
         rows = get_all_expenses_with_user()
     else:
-        rows = get_expenses_by_user(session["user_id"])
+        rows = get_expenses_by_user(g.user_id)
     for r in rows:
         r["amount"] = float(r["amount"])
     return jsonify(rows)
@@ -186,7 +218,7 @@ def api_add_expense():
     exp_id = add_expense(
         date=data["date"], person=data["person"], category=data["category"],
         amount=float(data["amount"]), remark=data.get("remark", ""),
-        image_path=data.get("image_path", ""), user_id=session["user_id"]
+        image_path=data.get("image_path", ""), user_id=g.user_id
     )
     return jsonify({"ok": True, "id": exp_id})
 
@@ -222,16 +254,16 @@ def api_parse_text():
     for r in records:
         add_expense(
             date=r.get("date", datetime.now().strftime("%Y-%m-%d")),
-            person=r.get("person", session["username"]),
+            person=r.get("person", g.username),
             category=r.get("category", "其他"),
             amount=r["amount"], remark=r.get("remark", ""),
-            user_id=session["user_id"]
+            user_id=g.user_id
         )
         added.append(r)
     return jsonify({"ok": True, "count": len(added), "records": added})
 
 
-# ---- OCR ----
+# ---- OCR（保持不变，但注意 uploadFile 也需要手动带 Token） ----
 _ocr_tasks = {}
 
 @app.route("/api/ocr", methods=["POST"])
@@ -292,9 +324,8 @@ def api_ocr_progress(task_id):
     if task["done"] and task["result"]:
         r = task["result"]
         if r["success"]:
-            # ★ 关键：即使 amount 为 None，也返回 ok: true
             resp["ok"] = True
-            resp["amount"] = r.get("amount")  # 可能是 None
+            resp["amount"] = r.get("amount")
             resp["engine"] = r.get("engine")
             resp["image_path"] = task.get("image_path", "")
             resp["raw_text"] = r.get("raw_text", "")
@@ -309,7 +340,8 @@ def api_ocr_progress(task_id):
 
     return jsonify(resp)
 
-# ---- 导出 / 查询 / 统计（不动） ----
+
+# ---- 导出 / 查询 / 统计（仅将 session 替换为 g） ----
 def _build_export_query():
     q = (request.args.get("q") or "").strip()
     category = (request.args.get("category") or "").strip()
@@ -318,8 +350,8 @@ def _build_export_query():
     end_date = (request.args.get("end_date") or "").strip()
     conn = get_connection()
     conditions, params = [], []
-    if not is_admin_user(session["user_id"]):
-        conditions.append("e.user_id = ?"); params.append(session["user_id"])
+    if not is_admin_user(g.user_id):
+        conditions.append("e.user_id = ?"); params.append(g.user_id)
     if q:
         conditions.append("(e.person LIKE ? OR e.remark LIKE ? OR e.category LIKE ?)")
         like = f"%{q}%"; params.extend([like, like, like])
@@ -346,7 +378,7 @@ def api_export():
     rows = _build_export_query()
     if not rows: return jsonify({"error": "没有可导出的数据"}), 400
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    uname = session.get("username", "user")
+    uname = g.get("username", "user")
     if fmt == "excel":
         p = export_to_excel(rows)
         return send_file(p, as_attachment=True, download_name=f"报销明细_{uname}_{ts}.xlsx")
@@ -381,9 +413,9 @@ def api_expenses_search():
 @login_required
 def api_stats():
     conn = get_connection()
-    is_admin = is_admin_user(session["user_id"])
+    is_admin = is_admin_user(g.user_id)
     filt = "" if is_admin else "WHERE e.user_id = ?"
-    par = [] if is_admin else [session["user_id"]]
+    par = [] if is_admin else [g.user_id]
     cat = conn.execute(
         f"SELECT e.category,COUNT(*) cnt,SUM(e.amount) total FROM expenses e {filt} GROUP BY e.category ORDER BY total DESC", par
     ).fetchall()

@@ -42,7 +42,6 @@
 </div>
 
 <script>
-document.cookie = "session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
 const inp = document.getElementById("username");
 inp.focus();
 inp.addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
@@ -54,11 +53,19 @@ async function doLogin() {
         const r = await fetch("/api/login", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
-            credentials: 'include',   // ← 关键：带上 cookie
+            // ★ 不再使用 credentials: 'include'
             body: JSON.stringify({username: name})
         });
-        if (r.ok) { window.location.replace("/") }
-        else { const d = await r.json(); alert(d.error); }
+        if (r.ok) {
+            const d = await r.json();
+            // ★ 保存 token 到 localStorage
+            localStorage.setItem('token', d.token);
+            localStorage.setItem('username', d.username);
+            window.location.replace("/");
+        } else {
+            const d = await r.json();
+            alert(d.error);
+        }
     } catch (e) { alert("连接失败，请检查服务是否启动"); }
 }
 </script>
