@@ -90,27 +90,34 @@ def verify_token(token):
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        # 1️⃣ 优先从 Authorization 头中提取 Token
+        token = None
+
+        # 1. 网页端：从 Cookie 中读取 Token
+        token = request.cookies.get('token')
+        if token:
+            payload = verify_token(token)
+            if payload:
+                g.user_id = payload['user_id']
+                g.username = payload['username']
+                return f(*args, **kwargs)
+
+        # 2. 小程序端/API：从 Authorization 头读取 Token
         auth_header = request.headers.get('Authorization', '')
         if auth_header.startswith('Bearer '):
             token = auth_header.split(' ')[1]
             payload = verify_token(token)
             if payload:
-                # 将用户信息存入 g 对象，供视图函数使用
                 g.user_id = payload['user_id']
                 g.username = payload['username']
                 return f(*args, **kwargs)
-            else:
-                # Token 无效或过期
-                return jsonify({"error": "登录已过期，请重新登录"}), 401
 
-        # 2️⃣ 回退到 Session（兼容旧的客户端，未来可删除）
+        # 3. Session 回退（如果有的话，可以保留兼容旧代码）
         if "user_id" in session:
             g.user_id = session["user_id"]
             g.username = session.get("username", "")
             return f(*args, **kwargs)
 
-        # 3️⃣ 均未通过
+        # 全部未通过
         log.warning(f"[AUTH] 未登录请求 path={request.path}")
         if request.path.startswith("/api/"):
             return jsonify({"error": "未登录"}), 401
@@ -166,31 +173,27 @@ def api_login():
         return jsonify({"error": "请输入有效用户名（1-20字符）"}), 400
 
     user = get_or_create_user(username)
-
-    # 生成 Token 并返回（不再使用 Session）
     token = create_token(user["id"], user["username"])
 
-    log.info(f"[LOGIN] user={username} id={user['id']} token issued")
-    return jsonify({
+    resp = jsonify({
         "ok": True,
         "token": token,
         "username": user["username"]
     })
 
-@app.route("/api/logout", methods=["POST"])
-@login_required
-def api_logout():
-    # Token 是无状态的，无需服务端销毁，前端清除即可
-    return jsonify({"ok": True})
+    # ★ 关键：同时把 Token 写入 HttpOnly Cookie，网页端会自动携带
+    resp.set_cookie(
+        'token',             # Cookie 名称
+        token,
+        max_age=timedelta(hours=JWT_EXPIRATION_HOURS),
+        path='/',
+        httponly=True,       # JS 无法读取，防 XSS
+        samesite='Lax'       # 允许在顶级导航（跳转）时发送
+        # secure=True        # 如果网站是 HTTPS 访问，请取消这行注释
+    )
 
-@app.route("/api/whoami")
-@login_required
-def api_whoami():
-    return jsonify({
-        "user_id": g.user_id,
-        "username": g.username,
-        "is_admin": is_admin_user(g.user_id),
-    })
+    log.info(f"[LOGIN] user={username} id={user['id']} token+cookie issued")
+    return resp
 
 
 # ===================== 以下业务路由（仅将 session 替换为 g） =====================
