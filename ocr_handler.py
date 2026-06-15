@@ -1,143 +1,150 @@
-"""
-OCR module - optimized for large bold numbers (e.g., WeChat/Alipay payment screenshots)
-策略：放大、锐化、裁剪上半部分、自适应二值化 + 单行模式识别
-"""
-
-import os
-import re
-import sys as _sys
 import cv2
 import numpy as np
 import pytesseract
+import re
+import os
 
-pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
-
-if getattr(_sys, 'frozen', False):
-    _LOG_PATH = os.path.join(os.path.dirname(_sys.executable), "ocr_debug.log")
-else:
-    import tempfile
-    _LOG_PATH = os.path.join(tempfile.gettempdir(), "wechat_expense_ocr_debug.log")
+# 尝试从环境变量获取路径，如果没有则使用默认
+try:
+    TESSERACT_PATH = os.environ.get("TESSERACT_PATH")
+    if TESSERACT_PATH:
+        pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
+except Exception:
+    pass
 
 def _log(msg):
-    try:
-        with open(_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(msg + "\n")
-    except Exception:
-        pass
-
+    print(f"[OCR-DEBUG] {msg}")
 
 def preprocess_for_amount(image_path):
-    """
-    专门针对微信/支付宝账单中大号加粗金额的预处理：
-    1. 裁剪上半部分（假设金额在顶部）
-    2. 放大2倍（分离粘连字符）
-    3. 锐化（增强边缘）
-    4. 自适应二值化（增强对比度）
-    """
-    img = cv2.imread(image_path)
-    if img is None:
-        return None
-
-    h, w, _ = img.shape
-
-    # 裁剪上半部分：取高度 1/3 的区域（金额通常在上方）
-    img_cropped = img[0:int(h/3), :]
-
-    # 放大2倍
-    scale = 2.0
-    new_w = int(w * scale)
-    new_h = int(img_cropped.shape[0] * scale)
-    img_scaled = cv2.resize(img_cropped, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
-
-    # 转灰度
-    gray = cv2.cvtColor(img_scaled, cv2.COLOR_BGR2GRAY)
-
-    # 锐化
-    kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
-    sharp = cv2.filter2D(gray, -1, kernel)
-
-    # 自适应二值化（反转，使文字为白色，背景为黑色）
-    binary = cv2.adaptiveThreshold(
-        sharp, 255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV,
-        blockSize=11,
-        C=2
-    )
-
-    return binary
-
-
-def extract_max_number(text):
-    """从OCR结果中提取最大的合理金额数字"""
-    if not text:
-        return None
-
-    # 清洗：去空格，保留数字、小数点、负号
-    text = re.sub(r'[^\d.\-]', '', text)
-
-    # 查找所有可能的数字（包括负数）
-    numbers = re.findall(r'-?\d+\.?\d*', text)
-    valid_numbers = []
-    for num_str in numbers:
-        try:
-            val = float(num_str)
-            # 过滤：金额一般在 0.01 ~ 999999 之间，负数可能是退款（取绝对值）
-            if 0.01 <= abs(val) <= 999999:
-                valid_numbers.append(abs(val))
-        except ValueError:
-            continue
-
-    if not valid_numbers:
-        return None
-
-    # 返回最大值（通常金额是最大的数字）
-    return round(max(valid_numbers), 2)
-
-
-def recognize_amount_from_image(image_path, progress_callback=None):
-    """
-    识别图片中的金额（优化版）
-    """
-    if not os.path.exists(image_path):
-        return {"success": False, "error": "File not found", "amount": None, "raw_text": "", "engine": "tesseract"}
-
+    """针对金额截图的特殊预处理：裁剪 -> 放大 -> 锐化 -> 二值化"""
     try:
-        if progress_callback:
-            progress_callback(10, "预处理图片...")
+        img = cv2.imread(image_path)
+        if img is None:
+            return None
+            
+        h, w, _ = img.shape
+        
+        # 1. 裁剪：专门针对微信/支付宝账单，只取顶部中间的金额区域
+        # 如果你的截图样式固定，这个比例效果最好
+        y_start = int(h * 0.15)
+        y_end = int(h * 0.40)
+        x_start = int(w * 0.25)
+        x_end = int(w * 0.75)
+        
+        img_crop = img[y_start:y_end, x_start:x_end]
+        
+        # 2. 放大：解决字体加粗粘连问题
+        scale = 3.0  # 放大3倍
+        new_w = int(img_crop.shape[1] * scale)
+        new_h = int(img_crop.shape[0] * scale)
+        img_resized = cv2.resize(img_crop, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
 
+        # 3. 锐化：让数字边缘更清晰
+        kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
+        img_sharp = cv2.filter2D(img_resized, -1, kernel)
+
+        # 4. 二值化：黑底白字
+        gray = cv2.cvtColor(img_sharp, cv2.COLOR_BGR2GRAY)
+        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        
+        return thresh
+        
+    except Exception as e:
+        _log(f"预处理报错: {e}")
+        return None
+
+def extract_amount_by_pattern(text):
+    """
+    通过正则匹配金额特征来提取，拒绝识别错误的乱码
+    """
+    # 1. 清洗文本，去掉空格和换行
+    clean_text = text.replace(" ", "").replace("\n", "")
+    
+    # 2. 重点：匹配金额特征
+    # \d{1,3}(,\d{3})*(\.\d{2})?  匹配 1,060.00 或 1060.00
+    # -\d+\.\d{2}               匹配 -1060.00
+    # \d+\.\d{2}                匹配 1060.00
+    
+    # 优先匹配带千分位逗号或小数的标准金额
+    # 注意：微信截图里金额通常是 -1060.00，所以我们也要考虑负号
+    patterns = [
+        r'-?\d{1,3}(,\d{3})*(\.\d{2})?',  # 匹配 1,234.56 或 1234.56 或 -100.00
+        r'-?\d+\.\d{2}'                   # 匹配 1060.00
+    ]
+    
+    candidates = []
+    
+    for pattern in patterns:
+        matches = re.findall(pattern, clean_text)
+        for m in matches:
+            # m 可能是元组 (如果有分组)，我们要取完整匹配
+            full_match = m[0] if isinstance(m, tuple) else m
+            
+            # 过滤掉不合理的数字
+            # 1. 长度限制：正常报销单不会超过 999999.99，也不会少于 0.01
+            if len(full_match) > 10: # 排除过长的时间戳或单号
+                continue
+                
+            # 2. 必须包含小数点（防止匹配到纯数字单号）
+            if '.' not in full_match:
+                continue
+                
+            # 3. 移除逗号再转浮点数
+            try:
+                num_str = full_match.replace(',', '')
+                num = float(num_str)
+                
+                # 过滤异常值：比如 0.00 的单据通常没意义，大于 10万 可能是单号
+                if 0 < num < 100000:
+                    candidates.append((num, full_match))
+            except ValueError:
+                continue
+                
+    if not candidates:
+        return None
+        
+    # 3. 排序：如果有多个候选（比如同时识别到了日期和金额），优先选数值最大的那个
+    # 通常金额是单据里最大的数字
+    candidates.sort(reverse=True)
+    return candidates[0][0]
+
+def recognize_with_tesseract(image_path, progress_callback=None):
+    try:
+        if progress_callback: progress_callback(10, "正在裁剪图片...")
         processed = preprocess_for_amount(image_path)
+        
         if processed is None:
-            return {"success": False, "error": "无法读取图片", "amount": None, "raw_text": "", "engine": "tesseract"}
+            return {"success": False, "error": "图片读取失败", "amount": None}
 
-        if progress_callback:
-            progress_callback(50, "OCR 识别中...")
-
-        # 关键配置：单行模式 + 严格字符白名单（只识别数字、小数点、负号）
-        config = r'--oem 3 --psm 7 -c tessedit_char_whitelist=0123456789.-'
-        text = pytesseract.image_to_string(processed, config=config).strip()
-
-        if progress_callback:
-            progress_callback(80, f"原始识别结果: {text}")
-
-        amount = extract_max_number(text)
-
-        if progress_callback:
-            progress_callback(100, "完成")
-
-        _log(f"[OCR] amount={amount} raw={text[:300]}")
-
+        if progress_callback: progress_callback(50, "正在识别...")
+        
+        # 配置：单行模式 + 严格数字白名单
+        config = r'--oem 3 --psm 7 -c tessedit_char_whitelist=0123456789.-,'
+        raw_text = pytesseract.image_to_string(processed, config=config).strip()
+        
+        if progress_callback: progress_callback(80, f"识别结果: {raw_text}")
+        
+        # 核心修正：使用正则提取，而不是找最大值
+        amount = extract_amount_by_pattern(raw_text)
+        
+        if amount is None:
+            # 备用方案：如果正则没匹配到，尝试找文本里最大的那个符合格式的浮点数
+            # 这一步是为了防止正则写漏了
+            numbers = re.findall(r'\d+\.\d{2}', raw_text)
+            valid_numbers = [float(n) for n in numbers if 0 < float(n) < 100000]
+            if valid_numbers:
+                amount = max(valid_numbers)
+        
         return {
             "success": True,
             "amount": amount,
-            "raw_text": text,
+            "raw_text": raw_text,
             "engine": "tesseract"
         }
-
+        
     except Exception as e:
-        _log(f"[OCR] error: {e}")
-        return {"success": False, "error": str(e), "amount": None, "raw_text": "", "engine": "tesseract"}
-
+        _log(f"Tesseract 报错: {str(e)}")
+        return {"success": False, "error": str(e), "amount": None, "raw_text": ""}
 
 def is_ocr_available():
     try:
