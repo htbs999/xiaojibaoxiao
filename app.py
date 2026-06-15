@@ -195,6 +195,14 @@ def api_login():
     log.info(f"[LOGIN] user={username} id={user['id']} token+cookie issued")
     return resp
 
+@app.route("/api/whoami")
+@login_required
+def api_whoami():
+    return jsonify({
+        "user_id": g.user_id,
+        "username": g.username,
+        "is_admin": is_admin_user(g.user_id),
+    })
 
 # ===================== 以下业务路由（仅将 session 替换为 g） =====================
 
