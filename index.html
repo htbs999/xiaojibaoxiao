@@ -490,6 +490,27 @@ async function parseAndPreview() {
 }
 async function confirmParse() {
     if(!parsedRecords.length) return;
+    // 逐条提交到 API
+    for (const r of parsedRecords) {
+        try {
+            const res = await apiFetch('/api/expenses', {
+                method: 'POST',
+                body: JSON.stringify({
+                    date: r.date,
+                    person: r.person,
+                    category: r.category,
+                    amount: r.amount,
+                    remark: r.remark || ''
+                })
+            });
+            if (!res.ok) {
+                const d = await res.json();
+                toast(d.error || '录入失败: ' + r.person + ' ' + r.category);
+            }
+        } catch(e) {
+            toast('录入异常');
+        }
+    }
     closeQuickAdd();
     search(currentPage);
     loadStats();

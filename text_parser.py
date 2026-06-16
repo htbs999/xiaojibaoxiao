@@ -154,7 +154,7 @@ def _extract_item_name(text: str, person: str, amount: float) -> str:
 
     # 去掉常见动词（长词优先，避免"购买"被"买"部分匹配）
     verbs = ['请客', '花了钱', '支付', '付款', '购买', '购入', '垫付', 
-             '请', '花了', '花', '付了', '付', '买了', '买', '用了', '用',
+             '请', '花了', '付了', '付', '买了', '买', '用了', '用',
              '给', '垫', '交了', '交']
     for v in sorted(verbs, key=len, reverse=True):
         result = result.replace(v, "")
