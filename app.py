@@ -619,14 +619,14 @@ def api_ocr_progress(task_id: str):
 # 应用启动
 # ------------------------------------------------------------------
 
+# 模块导入时自动初始化数据库（兼容 gunicorn 部署方式）
+init_db()
+ensure_admin_exists()
+logger.info("数据库初始化完成")
+
+# 检查 OCR 引擎状态
+ocr_ok = init_ocr_engine()
+logger.info("OCR 引擎%s", "就绪" if ocr_ok else "不可用（请安装 Tesseract）")
+
 if __name__ == "__main__":
-    # 初始化 SQLite 数据库（自动建表）
-    init_db()
-    ensure_admin_exists()
-    logger.info("数据库初始化完成")
-
-    # 检查 OCR 引擎状态
-    ocr_ok = init_ocr_engine()
-    logger.info("OCR 引擎%s", "就绪" if ocr_ok else "不可用（请安装 Tesseract）")
-
     app.run(debug=True, port=5000)
