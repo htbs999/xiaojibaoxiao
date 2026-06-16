@@ -21,6 +21,7 @@ import os
 import re
 import tempfile
 import threading
+import time
 import uuid
 from datetime import datetime, timedelta
 from functools import wraps
@@ -63,6 +64,54 @@ JWT_EXPIRY_HOURS = 24
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# ------------------------------------------------------------------
+# 24 小时自动清理过期数据
+# ------------------------------------------------------------------
+
+CLEANUP_INTERVAL = 3600  # 每小时检查一次
+DATA_RETENTION_HOURS = 24
+
+
+def _cleanup_old_data():
+    """删除超过 24 小时的图片文件及对应的 OCR 任务记录"""
+    while True:
+        try:
+            now = time.time()
+            cutoff = now - DATA_RETENTION_HOURS * 3600
+            deleted = 0
+
+            # 扫描 uploads 目录，删除过期文件
+            if os.path.isdir(UPLOAD_FOLDER):
+                for fname in os.listdir(UPLOAD_FOLDER):
+                    fpath = os.path.join(UPLOAD_FOLDER, fname)
+                    if os.path.isfile(fpath) and os.path.getmtime(fpath) < cutoff:
+                        os.remove(fpath)
+                        deleted += 1
+
+            # 清理数据库里对应的过期 OCR 任务记录
+            from db_manager import get_connection
+            conn = get_connection()
+            expiry = (datetime.utcnow() - timedelta(hours=DATA_RETENTION_HOURS)).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+            conn.execute(
+                "DELETE FROM ocr_tasks WHERE created_at < ?", (expiry,)
+            )
+            conn.commit()
+            conn.close()
+
+            if deleted:
+                logger.info("清理过期文件 %d 个", deleted)
+        except Exception:
+            logger.exception("清理过期数据异常")
+
+        time.sleep(CLEANUP_INTERVAL)
+
+
+# 启动后台清理线程（daemon=True，随主进程退出）
+_cleanup_thread = threading.Thread(target=_cleanup_old_data, daemon=True)
+_cleanup_thread.start()
 
 
 # ------------------------------------------------------------------
@@ -518,11 +567,20 @@ def api_export():
 @app.route("/api/image/<filename>", methods=["GET"])
 @require_auth
 def api_get_image(filename: str):
-    """获取 OCR 识别的截图文件"""
+    """获取 OCR 识别的截图文件（超过 24 小时的自动返回 404）"""
     safe_name = secure_filename(filename)
     filepath = os.path.join(UPLOAD_FOLDER, safe_name)
     if not os.path.isfile(filepath):
         return jsonify({"error": "图片不存在"}), 404
+
+    # 检查文件是否超过 24 小时
+    if os.path.getmtime(filepath) < time.time() - DATA_RETENTION_HOURS * 3600:
+        try:
+            os.remove(filepath)
+        except OSError:
+            pass
+        return jsonify({"error": "图片已过期（超过 24 小时）"}), 404
+
     return send_file(filepath)
 
 
