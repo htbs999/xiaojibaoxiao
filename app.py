@@ -9,11 +9,13 @@ PEP8 规范，完善异常处理，详细注释。
 
 import base64
 import logging
+import os
 import re
+import tempfile
 
 from flask import Flask, jsonify, request
 
-from ocr_handler import ocr_engine  # OCR 引擎实例，提供 process(image_bytes) -> dict
+from ocr_handler import recognize_amount_from_image  # 微信/支付宝截图金额识别
 
 app = Flask(__name__)
 logger = logging.getLogger(__name__)
@@ -110,23 +112,37 @@ def ocr():
     # 第二步：统一的 OCR 处理逻辑（两种模式共享，零重复）
     # ----------------------------------------------------------
     try:
-        result = ocr_engine.process(image_bytes)
+        # ocr_handler 的识别函数按文件路径读图，需先写入临时文件
+        suffix = '.png'  # OpenCV 可自动识别实际格式
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(image_bytes)
+            tmp_path = tmp.name
+
+        try:
+            result = recognize_amount_from_image(tmp_path)
+        finally:
+            # 无论成功失败都清理临时文件
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+        # 标准化返回值
+        if result.get('success'):
+            return jsonify({
+                'amount': result.get('amount'),
+                'text': result.get('raw_text', ''),
+            })
+        else:
+            logger.warning('OCR 识别未提取到金额: %s', result.get('error', ''))
+            return jsonify({
+                'amount': None,
+                'text': result.get('raw_text', ''),
+                'warning': result.get('error', '未提取到金额'),
+            })
     except Exception as exc:
         logger.exception('OCR 引擎处理异常')
         return jsonify({'error': f'OCR 识别失败: {exc}'}), 500
-
-    return jsonify(result)
-
-
-# ------------------------------------------------------------------
-# 可选：独立的测试用 OCR 引擎桩（仅供本地验证，生产环境请替换）
-# ------------------------------------------------------------------
-# class _MockOcrEngine:
-#     """模拟 OCR 引擎，返回固定结果用于测试。"""
-#     def process(self, image_bytes: bytes) -> dict:
-#         return {'text': 'Hello, World!'}
-#
-# ocr_engine = _MockOcrEngine()
 
 
 if __name__ == '__main__':
