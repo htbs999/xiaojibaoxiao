@@ -36,6 +36,7 @@ from db_manager import (
     delete_expense,
     ensure_admin_exists,
     get_all_expenses_with_user,
+    get_expenses_with_user,
     get_or_create_user,
     get_connection,
     get_ocr_task,
@@ -334,7 +335,14 @@ def api_search_expenses():
     start_date = request.args.get("start_date", "").strip()
     end_date = request.args.get("end_date", "").strip()
 
-    all_expenses = get_all_expenses_with_user()
+    user_id = request.current_user["user_id"]
+    is_admin = request.current_user["is_admin"]
+
+    # admin 看全部，普通用户只看自己的
+    if is_admin:
+        all_expenses = get_all_expenses_with_user()
+    else:
+        all_expenses = get_expenses_with_user(user_id)
 
     # 筛选
     filtered = []
@@ -386,7 +394,13 @@ def api_stats():
         by_person: [{person, count, amount}],
     }
     """
-    expenses = get_all_expenses_with_user()
+    user_id = request.current_user["user_id"]
+    is_admin = request.current_user["is_admin"]
+
+    if is_admin:
+        expenses = get_all_expenses_with_user()
+    else:
+        expenses = get_expenses_with_user(user_id)
 
     total_count = len(expenses)
     total_amount = round(sum(e.get("amount", 0) for e in expenses), 2)
@@ -528,7 +542,13 @@ def api_export():
     start_date = request.args.get("start_date", "").strip()
     end_date = request.args.get("end_date", "").strip()
 
-    all_expenses = get_all_expenses_with_user()
+    user_id = request.current_user["user_id"]
+    is_admin = request.current_user["is_admin"]
+
+    if is_admin:
+        all_expenses = get_all_expenses_with_user()
+    else:
+        all_expenses = get_expenses_with_user(user_id)
 
     # 应用筛选条件
     filtered = []

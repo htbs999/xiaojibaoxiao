@@ -210,6 +210,33 @@ def get_expenses_by_user(user_id):
     return [dict(r) for r in rows]
 
 
+def get_expenses_with_user(user_id=None):
+    """获取报销记录及用户名，可按 user_id 筛选
+
+    Args:
+        user_id: 若为 None 返回所有记录（管理员），否则只返回该用户的记录
+    """
+    conn = get_connection()
+    if user_id is None:
+        rows = conn.execute(
+            """SELECT e.*, u.username
+               FROM expenses e
+               LEFT JOIN users u ON e.user_id = u.id
+               ORDER BY e.date DESC, e.id DESC"""
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT e.*, u.username
+               FROM expenses e
+               LEFT JOIN users u ON e.user_id = u.id
+               WHERE e.user_id = ?
+               ORDER BY e.date DESC, e.id DESC""",
+            (user_id,)
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def is_admin_user(user_id):
     conn = get_connection()
     row = conn.execute("SELECT is_admin FROM users WHERE id=?", (user_id,)).fetchone()
