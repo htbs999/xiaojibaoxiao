@@ -1,0 +1,26 @@
+# 环境
+venv/
+.env
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 数据库
+*.db
+instance/
+
+# 工作区配置（本地独有，不上传）
+.workbuddy/
+
+# 上传的图片
+uploads/
+
+# 导出文件
+*.xlsx
+*.pdf
+
+# 系统
+.DS_Store
+Thumbs.db
