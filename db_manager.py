@@ -22,6 +22,26 @@ def get_connection():
 def init_db():
     conn = get_connection()
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS ocr_tasks (
+            task_id TEXT PRIMARY KEY,
+            progress INTEGER DEFAULT 0,
+            status TEXT DEFAULT '排队中',
+            done INTEGER DEFAULT 0,
+            ok INTEGER DEFAULT 0,
+            amount REAL,
+            raw_text TEXT DEFAULT '',
+            image_path TEXT DEFAULT '',
+            engine TEXT DEFAULT '',
+            error TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        )
+    """)
+    # 兼容旧表
+    task_cols = [c[1] for c in conn.execute("PRAGMA table_info(ocr_tasks)").fetchall()]
+    for col in ("raw_text", "image_path", "engine", "error"):
+        if col not in task_cols:
+            conn.execute(f"ALTER TABLE ocr_tasks ADD COLUMN {col} TEXT DEFAULT ''")
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL UNIQUE,
@@ -53,6 +73,48 @@ def init_db():
     conn.commit()
     conn.close()
     log.info("数据库初始化完成（SQLite）")
+
+
+# ------------------------------------------------------------------
+# OCR 任务存储（SQLite 共享，兼容 gunicorn 多 worker）
+# ------------------------------------------------------------------
+
+def create_ocr_task(task_id: str):
+    """创建 OCR 任务记录"""
+    conn = get_connection()
+    conn.execute(
+        "INSERT OR IGNORE INTO ocr_tasks (task_id) VALUES (?)",
+        (task_id,)
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_ocr_task(task_id: str, **fields):
+    """更新 OCR 任务字段"""
+    if not fields:
+        return
+    sets = ", ".join(f"{k}=?" for k in fields)
+    vals = list(fields.values()) + [task_id]
+    conn = get_connection()
+    conn.execute(f"UPDATE ocr_tasks SET {sets} WHERE task_id=?", vals)
+    conn.commit()
+    conn.close()
+
+
+def get_ocr_task(task_id: str) -> dict | None:
+    """获取 OCR 任务状态"""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM ocr_tasks WHERE task_id=?", (task_id,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    d = dict(row)
+    d["done"] = bool(d["done"])
+    d["ok"] = bool(d["ok"])
+    return d
 
 
 def add_expense(date, person, category, amount, remark="", image_path="", user_id=None):

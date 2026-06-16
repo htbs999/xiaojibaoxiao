@@ -31,13 +31,16 @@ from werkzeug.utils import secure_filename
 
 from db_manager import (
     add_expense,
+    create_ocr_task,
     delete_expense,
     ensure_admin_exists,
     get_all_expenses_with_user,
     get_or_create_user,
     get_connection,
+    get_ocr_task,
     init_db,
     update_expense,
+    update_ocr_task,
 )
 from excel_exporter import export_to_excel
 from ocr_handler import init_ocr_engine, recognize_amount_from_image
@@ -60,11 +63,6 @@ JWT_EXPIRY_HOURS = 24
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-# ------------------------------------------------------------------
-# 异步 OCR 任务状态池（内存字典，生产环境建议换 Redis）
-# ------------------------------------------------------------------
-ocr_tasks: dict = {}
 
 
 # ------------------------------------------------------------------
@@ -146,25 +144,23 @@ def _extract_base64_image(raw_image: str) -> bytes:
 # ------------------------------------------------------------------
 
 def _run_ocr_task(task_id: str, image_bytes: bytes):
-    """后台线程执行 OCR 识别并更新任务状态
+    """后台线程执行 OCR 识别并更新数据库中的任务状态
 
     Args:
         task_id: 任务唯一标识
         image_bytes: 图像二进制数据
     """
-    task = ocr_tasks[task_id]
     suffix = ".png"
 
     try:
-        task["progress"] = 10
-        task["status"] = "准备图像..."
+        update_ocr_task(task_id, progress=10, status="准备图像...")
 
         # 保存图片副本到上传目录（供前端查看）
         filename = f"ocr_{task_id}.png"
         save_path = os.path.join(UPLOAD_FOLDER, filename)
         with open(save_path, "wb") as f:
             f.write(image_bytes)
-        task["image_path"] = filename
+        update_ocr_task(task_id, image_path=filename)
 
         # 写入临时文件供 OpenCV 读取
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -172,35 +168,38 @@ def _run_ocr_task(task_id: str, image_bytes: bytes):
             tmp_path = tmp.name
 
         try:
-            task["progress"] = 50
-            task["status"] = "OCR 分析中..."
+            update_ocr_task(task_id, progress=50, status="OCR 分析中...")
 
             result = recognize_amount_from_image(tmp_path)
 
-            task["progress"] = 100
-            task["done"] = True
-
             if result.get("success"):
-                task["ok"] = True
-                task["amount"] = result.get("amount")
-                task["raw_text"] = result.get("raw_text", "")
-                task["engine"] = result.get("engine", "tesseract")
-                task["status"] = "完成" if result.get("amount") is not None else "未提取到金额"
+                amount = result.get("amount")
+                update_ocr_task(
+                    task_id,
+                    progress=100, done=1, ok=1,
+                    amount=amount,
+                    raw_text=result.get("raw_text", ""),
+                    engine=result.get("engine", "tesseract"),
+                    status="完成" if amount is not None else "未提取到金额",
+                )
             else:
-                task["ok"] = False
-                task["error"] = result.get("error", "识别失败")
-                task["status"] = "识别失败"
+                update_ocr_task(
+                    task_id,
+                    progress=100, done=1, ok=0,
+                    error=result.get("error", "识别失败"),
+                    status="识别失败",
+                )
         finally:
-            # 清理临时文件
             try:
                 os.unlink(tmp_path)
             except OSError:
                 pass
     except Exception as e:
-        task["done"] = True
-        task["ok"] = False
-        task["error"] = str(e)
-        task["status"] = "系统错误"
+        update_ocr_task(
+            task_id,
+            progress=100, done=1, ok=0,
+            error=str(e), status="系统错误",
+        )
 
 
 # ------------------------------------------------------------------
@@ -580,19 +579,9 @@ def api_ocr():
             logger.exception("文件读取失败")
             return jsonify({"error": f"文件读取失败: {exc}"}), 400
 
-    # 第二步：创建异步 OCR 任务
+    # 第二步：创建异步 OCR 任务（写入 SQLite，多 worker 共享）
     task_id = uuid.uuid4().hex[:12]
-    ocr_tasks[task_id] = {
-        "progress": 0,
-        "status": "排队中",
-        "done": False,
-        "ok": False,
-        "amount": None,
-        "raw_text": "",
-        "image_path": "",
-        "engine": "",
-        "error": "",
-    }
+    create_ocr_task(task_id)
 
     thread = threading.Thread(target=_run_ocr_task, args=(task_id, image_bytes))
     thread.daemon = True
@@ -609,7 +598,7 @@ def api_ocr_progress(task_id: str):
     返回:
         {progress, status, done, ok, amount, raw_text, image_path, engine, error}
     """
-    task = ocr_tasks.get(task_id)
+    task = get_ocr_task(task_id)
     if not task:
         return jsonify({"error": "任务不存在"}), 404
     return jsonify(task)
