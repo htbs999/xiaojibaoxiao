@@ -161,7 +161,7 @@
         <table>
             <thead>
                 <tr>
-                    <th>日期</th><th>报销人</th><th>品类</th><th>金额</th><th>图片</th><th>用户</th><th>备注</th><th>操作</th>
+                    <th>日期</th><th>报销人</th><th>品类</th><th>金额</th><th>图片</th><th>备注</th><th>操作</th>
                 </tr>
             </thead>
             <tbody id="tableBody"></tbody>
@@ -323,7 +323,7 @@ async function search(page=1) {
 function renderTable(data) {
     const tbody = document.getElementById('tableBody');
     if(!data.length) {
-        tbody.innerHTML = `<tr><td colspan="8" class="empty-state">暂无数据</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="empty-state">暂无数据</td></tr>`;
         return;
     }
     tbody.innerHTML = data.map(r=>`
@@ -333,7 +333,6 @@ function renderTable(data) {
             <td>${esc(r.category)}</td>
             <td class="amount">¥${r.amount.toFixed(2)}</td>
             <td>${r.image_path ? `<a href="#" onclick="viewImage('${escAttr(r.image_path)}');return false" style="color:#3498DB;font-size:12px">查看</a>` : '<span style="color:#ccc">-</span>'}</td>
-            <td>${esc(r.username||'')}</td>
             <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.remark||'')}</td>
             <td class="actions">
                 <button class="btn btn-outline btn-sm" onclick="openEdit(${r.id},'${r.date}','${esc(r.person)}','${esc(r.category)}',${r.amount},'${esc(r.remark||'')}')">编辑</button>

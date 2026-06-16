@@ -203,3 +203,6 @@ def _write_summary_sheet(ws, expenses):
     ws.column_dimensions["B"].width = 10
     ws.column_dimensions["C"].width = 18
     ws.column_dimensions["D"].width = 10
+    ws.freeze_panes = "A2"
+    ws.sheet_view.topLeftCell = "A1"      # 打开时定位到左上角
+    ws.sheet_view.zoomScale = 100 
