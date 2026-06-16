@@ -13,8 +13,7 @@ import re
 
 from flask import Flask, jsonify, request
 
-# 假设 OCR 引擎已存在，提供 process(image_bytes) -> dict
-from somewhere import ocr_engine
+from ocr_handler import ocr_engine  # OCR 引擎实例，提供 process(image_bytes) -> dict
 
 app = Flask(__name__)
 logger = logging.getLogger(__name__)
