@@ -146,6 +146,25 @@ def delete_expense(expense_id):
     conn.close()
 
 
+def delete_expenses_batch(ids: list[int]):
+    """批量删除报销记录"""
+    if not ids:
+        return
+    conn = get_connection()
+    placeholders = ",".join("?" for _ in ids)
+    conn.execute(f"DELETE FROM expenses WHERE id IN ({placeholders})", ids)
+    conn.commit()
+    conn.close()
+
+
+def delete_all_expenses():
+    """清空所有报销记录"""
+    conn = get_connection()
+    conn.execute("DELETE FROM expenses")
+    conn.commit()
+    conn.close()
+
+
 def get_all_expenses():
     conn = get_connection()
     rows = conn.execute("SELECT * FROM expenses ORDER BY date DESC, id DESC").fetchall()

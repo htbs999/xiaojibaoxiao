@@ -33,7 +33,9 @@ from werkzeug.utils import secure_filename
 from db_manager import (
     add_expense,
     create_ocr_task,
+    delete_all_expenses,
     delete_expense,
+    delete_expenses_batch,
     ensure_admin_exists,
     get_all_expenses_with_user,
     get_expenses_with_user,
@@ -496,6 +498,38 @@ def api_delete_expense(expense_id: int):
     except Exception as e:
         logger.exception("删除报销记录失败")
         return jsonify({"error": f"删除失败: {e}"}), 500
+
+
+@app.route("/api/expenses/batch-delete", methods=["POST"])
+@require_auth
+def api_batch_delete():
+    """批量删除报销记录"""
+    data = request.get_json(silent=True)
+    if not data or "ids" not in data or not isinstance(data["ids"], list):
+        return jsonify({"error": "缺少 ids 参数，格式: {\"ids\": [101,102]}"}), 400
+    ids = data["ids"]
+    if not ids:
+        return jsonify({"error": "ids 不能为空"}), 400
+    try:
+        delete_expenses_batch(ids)
+        return jsonify({"ok": True, "deleted": len(ids)})
+    except Exception as e:
+        logger.exception("批量删除失败")
+        return jsonify({"error": f"批量删除失败: {e}"}), 500
+
+
+@app.route("/api/expenses/all", methods=["DELETE"])
+@require_auth
+def api_clear_all():
+    """清空所有报销记录（高危操作，仅管理员可执行）"""
+    if not request.current_user.get("is_admin"):
+        return jsonify({"error": "仅管理员可执行清空操作"}), 403
+    try:
+        delete_all_expenses()
+        return jsonify({"ok": True, "message": "已清空全部报销记录"})
+    except Exception as e:
+        logger.exception("清空失败")
+        return jsonify({"error": f"清空失败: {e}"}), 500
 
 
 # ------------------------------------------------------------------

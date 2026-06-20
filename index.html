@@ -62,7 +62,15 @@
         tr:hover td{background:#f0f4ff}
         td.amount{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
         td.actions{text-align:center}
+        td.cb-col, th.cb-col{width:36px;text-align:center;padding:9px 4px}
         .empty-state{padding:40px;text-align:center;color:#999;font-size:14px}
+
+        /* 批量操作栏 */
+        .batch-bar{display:none;align-items:center;gap:10px;padding:8px 12px;margin-bottom:10px;background:#eef5ff;border-radius:8px;font-size:13px;border:1px solid #d0e2ff}
+        .batch-bar.show{display:flex}
+        .batch-bar .count{color:#2c3e50;font-weight:500}
+        .batch-bar .count b{color:#3498DB}
+        .batch-bar .spacer{flex:1}
 
         /* 分页 */
         .pagination{display:flex;align-items:center;justify-content:center;gap:4px;padding:10px;background:#fff;border-top:1px solid #eee}
@@ -156,11 +164,20 @@
         <button class="btn btn-outline btn-sm" onclick="clearFilters()">清除</button>
     </div>
 
+    <!-- 批量操作栏 -->
+    <div class="batch-bar" id="batchBar">
+        <span class="count">已选择 <b id="selectedCount">0</b> 条</span>
+        <div class="spacer"></div>
+        <button class="btn btn-danger btn-sm" onclick="batchDelete()">批量删除</button>
+        <button class="btn btn-danger btn-sm" onclick="clearAll()">一键清空</button>
+    </div>
+
     <!-- 表格 -->
     <div class="table-wrap">
         <table>
             <thead>
                 <tr>
+                    <th class="cb-col"><input type="checkbox" id="masterCheck" onchange="toggleAll()" title="全选/取消全选"></th>
                     <th>日期</th><th>报销人</th><th>品类</th><th>金额</th><th>图片</th><th>备注</th><th>操作</th>
                 </tr>
             </thead>
@@ -275,6 +292,7 @@ let editingId = null;
 let isAdmin = false;
 let searchTimer = null;
 const PER_PAGE = 20;
+let selectedIds = new Set();
 
 // ====== 初始化 ======
 async function init() {
@@ -323,11 +341,13 @@ async function search(page=1) {
 function renderTable(data) {
     const tbody = document.getElementById('tableBody');
     if(!data.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="empty-state">暂无数据</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="empty-state">暂无数据</td></tr>`;
         return;
     }
-    tbody.innerHTML = data.map(r=>`
-        <tr>
+    tbody.innerHTML = data.map(r=>{
+        const checked = selectedIds.has(r.id) ? 'checked' : '';
+        return `<tr>
+            <td class="cb-col"><input type="checkbox" class="row-check" data-id="${r.id}" ${checked} onchange="rowSelect(${r.id}, this.checked)"></td>
             <td>${r.date}</td>
             <td>${esc(r.person)}</td>
             <td>${esc(r.category)}</td>
@@ -338,8 +358,85 @@ function renderTable(data) {
                 <button class="btn btn-outline btn-sm" onclick="openEdit(${r.id},'${r.date}','${esc(r.person)}','${esc(r.category)}',${r.amount},'${esc(r.remark||'')}')">编辑</button>
                 <button class="btn btn-danger btn-sm" onclick="del(${r.id})">删除</button>
             </td>
-        </tr>
-    `).join('');
+        </tr>`;
+    }).join('');
+    updateBatchBar();
+}
+
+function updateBatchBar() {
+    const bar = document.getElementById('batchBar');
+    const countEl = document.getElementById('selectedCount');
+    const master = document.getElementById('masterCheck');
+    const count = selectedIds.size;
+    countEl.textContent = count;
+    bar.classList.toggle('show', count > 0);
+    // 同步全选复选框状态
+    const totalOnPage = document.querySelectorAll('.row-check').length;
+    const checkedOnPage = document.querySelectorAll('.row-check:checked').length;
+    if (master) master.checked = totalOnPage > 0 && checkedOnPage === totalOnPage;
+    master.indeterminate = checkedOnPage > 0 && checkedOnPage < totalOnPage;
+}
+
+function toggleAll() {
+    const master = document.getElementById('masterCheck');
+    const checks = document.querySelectorAll('.row-check');
+    checks.forEach(cb => {
+        cb.checked = master.checked;
+        const id = parseInt(cb.dataset.id);
+        if (master.checked) selectedIds.add(id);
+        else selectedIds.delete(id);
+    });
+    updateBatchBar();
+}
+
+function rowSelect(id, checked) {
+    if (checked) selectedIds.add(id);
+    else selectedIds.delete(id);
+    updateBatchBar();
+}
+
+async function batchDelete() {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`确定删除选中的 ${selectedIds.size} 条报销记录？此操作不可恢复。`)) return;
+    const ids = Array.from(selectedIds);
+    try {
+        const res = await apiFetch('/api/expenses/batch-delete', {
+            method: 'POST',
+            body: JSON.stringify({ ids })
+        });
+        const d = await res.json();
+        if (d.ok) {
+            // 从选中集合中移除已删除的 ID
+            ids.forEach(id => selectedIds.delete(id));
+            toast(`已删除 ${d.deleted} 条记录`);
+            search(currentPage);
+            loadStats();
+        } else {
+            toast(d.error || '批量删除失败');
+        }
+    } catch(e) {
+        toast('批量删除失败');
+    }
+}
+
+async function clearAll() {
+    if (!isAdmin) { toast('仅管理员可执行清空操作'); return; }
+    if (!confirm('⚠️ 确定要清空所有报销记录？此操作不可恢复！')) return;
+    if (!confirm('再次确认：所有数据将被永久删除，确定继续？')) return;
+    try {
+        const res = await apiFetch('/api/expenses/all', { method: 'DELETE' });
+        const d = await res.json();
+        if (d.ok) {
+            selectedIds.clear();
+            toast('已清空全部报销记录');
+            search(1);
+            loadStats();
+        } else {
+            toast(d.error || '清空失败');
+        }
+    } catch(e) {
+        toast('清空失败');
+    }
 }
 
 function renderPager(d) {
