@@ -5,8 +5,9 @@ import os
 from datetime import datetime
 from io import BytesIO
 
+from PIL import Image
 from docx import Document
-from docx.shared import Inches, Pt, Cm
+from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 
@@ -15,6 +16,33 @@ from logger import get_logger
 log = get_logger("word_exporter")
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
+
+
+def _load_image_for_docx(full_path: str) -> BytesIO | None:
+    """用 Pillow 读取图片并统一转为 PNG 流，兼容各种上传格式
+
+    Args:
+        full_path: 图片文件绝对路径
+
+    Returns:
+        PNG 格式的 BytesIO 流，失败返回 None
+    """
+    try:
+        img = Image.open(full_path)
+        # 统一转为 RGB（处理 RGBA、调色板等模式）
+        if img.mode in ("RGBA", "LA", "P"):
+            # 保留透明通道用 RGBA
+            if img.mode == "P":
+                img = img.convert("RGBA")
+        else:
+            img = img.convert("RGB")
+        buf = BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        return buf
+    except Exception as e:
+        log.warning("Pillow 读取图片失败 %s: %s", full_path, e)
+        return None
 
 
 def export_to_word(expenses: list[dict]) -> str:
@@ -37,7 +65,6 @@ def export_to_word(expenses: list[dict]) -> str:
     subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = subtitle.add_run(f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}")
     run.font.size = Pt(10)
-    run.font.color.rgb = None
 
     # ---- 汇总信息 ----
     total_amount = round(sum(e.get("amount", 0) for e in expenses), 2)
@@ -91,15 +118,19 @@ def export_to_word(expenses: list[dict]) -> str:
             if img_path:
                 full_path = os.path.join(UPLOAD_FOLDER, os.path.basename(img_path))
                 if os.path.isfile(full_path):
-                    try:
-                        # 图片缩放到适合表格的宽度
-                        p = img_cell.paragraphs[0]
-                        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        run = p.add_run()
-                        run.add_picture(full_path, width=Inches(2.0))
-                    except Exception as e:
-                        log.warning("插入图片失败 %s: %s", full_path, e)
-                        img_cell.text = "图片加载失败"
+                    # 用 Pillow 统一转 PNG 再嵌入，兼容各种上传格式
+                    img_stream = _load_image_for_docx(full_path)
+                    if img_stream:
+                        try:
+                            p = img_cell.paragraphs[0]
+                            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            run = p.add_run()
+                            run.add_picture(img_stream, width=Inches(2.0))
+                        except Exception as e:
+                            log.warning("插入图片失败 %s: %s", full_path, e)
+                            img_cell.text = "图片加载失败"
+                    else:
+                        img_cell.text = "图片格式不支持"
                 else:
                     img_cell.text = "图片已过期"
             else:
