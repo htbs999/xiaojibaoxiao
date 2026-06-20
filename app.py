@@ -50,6 +50,7 @@ from excel_exporter import export_to_excel
 from ocr_handler import init_ocr_engine, recognize_amount_from_image
 from pdf_exporter import export_to_pdf
 from text_parser import parse_expense_text
+from word_exporter import export_to_word
 
 app = Flask(__name__)
 logger = logging.getLogger(__name__)
@@ -607,6 +608,8 @@ def api_export():
 
     if fmt == "pdf":
         output_path = export_to_pdf(filtered)
+    elif fmt == "word":
+        output_path = export_to_word(filtered)
     else:
         output_path = export_to_excel(filtered)
 

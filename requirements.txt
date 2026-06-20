@@ -8,3 +8,4 @@ pytesseract==0.3.10
 opencv-python-headless==4.8.1.78
 numpy==1.26.2
 PyJWT==2.8.0
+python-docx==1.1.0
